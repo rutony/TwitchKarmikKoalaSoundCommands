@@ -22,7 +22,6 @@ using TwitchLib.PubSub;
 using TwitchLib.PubSub.Events;
 using TwitchLib.PubSub.Models.Responses.Messages.Redemption;
 
-
 public class VolumeSampleProvider : ISampleProvider {
     private readonly ISampleProvider source;
     public float Volume { get; set; }
@@ -63,17 +62,23 @@ public class TwitchSoundBot {
     private string lastRewardsError = "";
     private string lastChatError = "";
 
+    // Статистика для отображения
+    private int chatEnabledCount = 0;
+    private int rewardEnabledCount = 0;
+    private int totalUsage = 0;
+
     public TwitchSoundBot() {
         soundCommands = new Dictionary<string, SoundCommand>();
         activeUsers = new HashSet<string>();
         LoadSettings();
         LoadSoundCommands();
         CheckSoundFiles();
+        UpdateStatistics();
     }
 
     public string GetChannelName() => settings.ChannelName;
     public int GetTotalCommands() => soundCommands.Count;
-    public int GetTotalUsage() => commandUsage.Values.Sum();
+    public int GetTotalUsage() => totalUsage;
     public Dictionary<string, int> GetCommandUsage() => commandUsage;
     public List<string> GetMissingFiles() => missingFiles;
     public string GetLastAuthError() => lastAuthError;
@@ -81,6 +86,14 @@ public class TwitchSoundBot {
     public string GetLastChatError() => lastChatError;
     public bool ChatEnabled => settings.ChatEnabled;
     public bool RewardsEnabled => settings.RewardsEnabled;
+    public int GetChatEnabledCount() => chatEnabledCount;
+    public int GetRewardEnabledCount() => rewardEnabledCount;
+
+    public void UpdateStatistics() {
+        chatEnabledCount = soundCommands.Count(c => c.Value.ChatEnabled);
+        rewardEnabledCount = soundCommands.Count(c => c.Value.RewardEnabled);
+        totalUsage = commandUsage.Values.Sum();
+    }
 
     public void ToggleChat() {
         settings.ChatEnabled = !settings.ChatEnabled;
@@ -91,7 +104,6 @@ public class TwitchSoundBot {
         settings.RewardsEnabled = !settings.RewardsEnabled;
         SaveSettings();
     }
-
 
     public void ToggleDebugMode() {
         settings.DebugMode = !settings.DebugMode;
@@ -279,7 +291,6 @@ public class TwitchSoundBot {
         } catch (Exception ex) {
             WriteDebug($"Ошибка проверки токена: {ex.Message}\n", ConsoleColor.Red);
         }
-
     }
 
     private void InitializePubSub() {
@@ -318,7 +329,7 @@ public class TwitchSoundBot {
 
             foreach (var reward in rewards.Data) {
                 // Находим команду по названию награды
-                var command = soundCommands.Values.FirstOrDefault(c => c.RewardTitle == reward.Title);
+                var command = soundCommands.Values.FirstOrDefault(c => c.RewardTitle == reward.Title && c.RewardEnabled);
                 if (command != null) {
                     var commandKey = soundCommands.FirstOrDefault(x => x.Value.RewardTitle == reward.Title).Key;
                     rewardIdToCommandMap[reward.Id] = commandKey;
@@ -342,9 +353,16 @@ public class TwitchSoundBot {
         }
 
         if (rewardIdToCommandMap.TryGetValue(e.RewardId.ToString(), out string command)) {
+            var soundCommand = soundCommands[command];
+
+            // Проверяем разрешена ли команда для наград
+            if (!soundCommand.RewardEnabled) {
+                WriteDebug($"❌ Команда {command} отключена для наград\n", ConsoleColor.Yellow);
+                return;
+            }
+
             // ПРОВЕРКА COOLDOWN ДЛЯ НАГРАД
             string userRewardKey = $"{e.DisplayName}_{command}";
-            var soundCommand = soundCommands[command];
 
             if (lastRewardUsage.ContainsKey(userRewardKey)) {
                 var lastUsage = lastRewardUsage[userRewardKey];
@@ -365,6 +383,7 @@ public class TwitchSoundBot {
             if (!commandUsage.ContainsKey(command))
                 commandUsage[command] = 0;
             commandUsage[command]++;
+            UpdateStatistics();
 
             // Обновляем время использования
             lastRewardUsage[userRewardKey] = DateTime.Now;
@@ -374,7 +393,7 @@ public class TwitchSoundBot {
             WriteDebug($"❌ Не найдено сопоставление для награды ID: {e.RewardId}\n", ConsoleColor.Red);
 
             // Попробуем найти команду по названию награды
-            var matchingCommand = soundCommands.Values.FirstOrDefault(c => c.RewardTitle == e.RewardTitle);
+            var matchingCommand = soundCommands.Values.FirstOrDefault(c => c.RewardTitle == e.RewardTitle && c.RewardEnabled);
             if (matchingCommand != null) {
                 var commandKey = soundCommands.FirstOrDefault(x => x.Value.RewardTitle == e.RewardTitle).Key;
                 WriteDebug($"🔍 Найдено совпадение по названию: {commandKey}\n", ConsoleColor.Yellow);
@@ -401,6 +420,7 @@ public class TwitchSoundBot {
                 if (!commandUsage.ContainsKey(commandKey))
                     commandUsage[commandKey] = 0;
                 commandUsage[commandKey]++;
+                UpdateStatistics();
 
                 ProcessSoundCommand(commandKey, e.DisplayName, null, true);
             }
@@ -425,7 +445,6 @@ public class TwitchSoundBot {
             apiToken = apiToken.Substring(6); // Убираем "oauth:"
         }
         api.Settings.AccessToken = apiToken;
-
 
         // Проверка авторизации
         lastAuthError = "";
@@ -531,9 +550,9 @@ public class TwitchSoundBot {
     private void OnJoinedChannel(object sender, OnJoinedChannelArgs e) {
         //client.SendMessage(e.Channel, "Бот звуков подключен! Используйте !звуки для списка команд.");
     }
+
     public string GetAuthUrl() {
         var scopes = "channel:manage:redemptions chat:edit chat:read";
-        //var scopes = "channel:manage:redemptions channel:read:redemptions channel:bot user:bot user:write:chat chat:edit chat:read user:read:email";
         var encodedScopes = Uri.EscapeDataString(scopes);
         return $"https://id.twitch.tv/oauth2/authorize?client_id={settings.ClientId}&redirect_uri=http://localhost&response_type=token&scope={encodedScopes}";
     }
@@ -561,6 +580,7 @@ public class TwitchSoundBot {
         if (message == "!reload" && e.ChatMessage.IsBroadcaster) {
             LoadSoundCommands();
             CheckSoundFiles();
+            UpdateStatistics();
             if (settings.RewardsEnabled)
                 _ = CreateCustomRewards();
             return;
@@ -572,6 +592,11 @@ public class TwitchSoundBot {
 
         if (soundCommands.ContainsKey(message.ToLower())) {
             var soundCommand = soundCommands[message.ToLower()];
+
+            // Проверяем разрешена ли команда для чата
+            if (!soundCommand.ChatEnabled) {
+                return;
+            }
 
             // ПРОВЕРКА COOLDOWN ДЛЯ ЧАТ-КОМАНД
             string userCommandKey = $"{username}_{message.ToLower()}";
@@ -590,6 +615,7 @@ public class TwitchSoundBot {
             if (!commandUsage.ContainsKey(message.ToLower()))
                 commandUsage[message.ToLower()] = 0;
             commandUsage[message.ToLower()]++;
+            UpdateStatistics();
 
             // Обновляем время использования
             lastCommandUsage[userCommandKey] = DateTime.Now;
@@ -613,12 +639,14 @@ public class TwitchSoundBot {
                     continue;
 
                 var parts = line.Split('|');
-                if (parts.Length >= 5) {
-                    string commandName = parts[0].Trim();
-                    string rewardTitle = parts[1].Trim();
-                    string soundFile = parts[2].Trim();
-                    int cost = int.Parse(parts[3].Trim());
-                    int cooldown = int.Parse(parts[4].Trim());
+                if (parts.Length >= 7) {
+                    bool chatEnabled = bool.Parse(parts[0].Trim());
+                    bool rewardEnabled = bool.Parse(parts[1].Trim());
+                    string commandName = parts[2].Trim();
+                    string rewardTitle = parts[3].Trim();
+                    string soundFile = parts[4].Trim();
+                    int cost = int.Parse(parts[5].Trim());
+                    int cooldown = int.Parse(parts[6].Trim());
 
                     // Убеждаемся, что команда начинается с !
                     if (!commandName.StartsWith("!")) {
@@ -631,7 +659,9 @@ public class TwitchSoundBot {
                         fullSoundPath,
                         cost,
                         cooldown,
-                        rewardTitle
+                        rewardTitle,
+                        chatEnabled,
+                        rewardEnabled
                     );
                 } else {
                     WriteColor($"Пропущена строка с неправильным форматом: {line}\n", ConsoleColor.Yellow);
@@ -645,9 +675,9 @@ public class TwitchSoundBot {
     private void CreateDefaultConfig() {
         var defaultConfig = new[]
         {
-            "# Формат: КомандаВЧате|НазваниеНаграды|ИмяФайла.mp3|Стоимость|Таймаут",
-            "!аттеншен|Аттеншен!|attention.mp3|500|180",
-            "!ааа|А-а-а-а-а|aaaa.mp3|1500|180"
+            "# Формат: ChatEnabled|RewardEnabled|Команда|НазваниеНаграды|Файл|Стоимость|Cooldown",
+            "true|true|!аттеншен|Аттеншен!|attention.mp3|500|180",
+            "true|true|!ааа|А-а-а-а-а|aaaa.mp3|1500|180"
         };
 
         File.WriteAllLines(configFile, defaultConfig);
@@ -680,13 +710,13 @@ public class TwitchSoundBot {
                 return false;
             }
 
-            // Теперь попробуем создать награды
+            // Теперь попробуем создать награды только для команд с RewardEnabled = true
             WriteDebug($"\n2. Пробуем создать награды...\n", ConsoleColor.White);
             var existingRewardsList = await api.Helix.ChannelPoints.GetCustomRewardAsync(channelId, new List<string>());
             var existingTitles = existingRewardsList.Data.Select(r => r.Title.ToLower()).ToHashSet();
             int createdCount = 0;
 
-            foreach (var soundCommand in soundCommands.Values) {
+            foreach (var soundCommand in soundCommands.Values.Where(c => c.RewardEnabled)) {
                 var rewardTitle = soundCommand.RewardTitle;
 
                 if (existingTitles.Contains(rewardTitle.ToLower())) {
@@ -743,18 +773,20 @@ public class TwitchSoundBot {
     }
 
     private void ShowSoundList(string channel) {
-        if (soundCommands.Count == 0) {
+        var availableCommands = soundCommands.Where(c => c.Value.ChatEnabled).ToList();
+
+        if (availableCommands.Count == 0) {
             client.SendMessage(channel, "Нет доступных звуков.");
             return;
         }
 
         var message = "Звуки: ";
-        foreach (var command in soundCommands.Take(3)) {
+        foreach (var command in availableCommands.Take(3)) {
             message += $"{command.Key} ";
         }
 
-        if (soundCommands.Count > 3) {
-            message += $"... (+{soundCommands.Count - 3})";
+        if (availableCommands.Count > 3) {
+            message += $"... (+{availableCommands.Count - 3})";
         }
 
         client.SendMessage(channel, message.Trim());
@@ -843,11 +875,22 @@ public class TwitchSoundBot {
         WriteColor("=== СТАТИСТИКА КОМАНД ===\n", ConsoleColor.Cyan);
         Console.WriteLine();
 
+        WriteColor($"Всего команд: {soundCommands.Count}\n", ConsoleColor.White);
+        WriteColor($"Для чата: {chatEnabledCount}\n", ConsoleColor.Green);
+        WriteColor($"Для наград: {rewardEnabledCount}\n", ConsoleColor.Yellow);
+        WriteColor($"Всего использований: {totalUsage}\n", ConsoleColor.Cyan);
+        Console.WriteLine();
+
         if (commandUsage.Count == 0) {
             WriteColor("Команды еще не использовались\n", ConsoleColor.Yellow);
         } else {
-            foreach (var cmd in commandUsage.OrderByDescending(x => x.Value)) {
-                Console.WriteLine($"{cmd.Key}: {cmd.Value} раз");
+            WriteColor("Топ команд по использованию:\n", ConsoleColor.White);
+            foreach (var cmd in commandUsage.OrderByDescending(x => x.Value).Take(10)) {
+                var command = soundCommands[cmd.Key];
+                Console.Write($"{cmd.Key}: {cmd.Value} раз");
+                Console.Write($" [Чат: {(command.ChatEnabled ? "✓" : "✗")}]");
+                Console.Write($" [Награды: {(command.RewardEnabled ? "✓" : "✗")}]");
+                Console.WriteLine();
             }
         }
 
@@ -902,12 +945,16 @@ public class SoundCommand {
     public int Cost { get; set; }
     public int Cooldown { get; set; }
     public string RewardTitle { get; set; }
+    public bool ChatEnabled { get; set; }
+    public bool RewardEnabled { get; set; }
 
-    public SoundCommand(string soundFile, int cost, int cooldown, string rewardTitle) {
+    public SoundCommand(string soundFile, int cost, int cooldown, string rewardTitle, bool chatEnabled, bool rewardEnabled) {
         SoundFile = soundFile;
         Cost = cost;
         Cooldown = cooldown;
         RewardTitle = rewardTitle;
+        ChatEnabled = chatEnabled;
+        RewardEnabled = rewardEnabled;
     }
 }
 
@@ -935,7 +982,7 @@ class Program {
             bot = new TwitchSoundBot();
 
             WriteColor("=== Twitch Sound Bot with Rewards ===\n", ConsoleColor.Cyan);
-            
+
             WriteColor("Подключение...\n", ConsoleColor.Yellow);
 
             var (authOk, authError, rewardsOk, rewardsError, chatOk, chatError) = await bot.Connect();
@@ -1005,6 +1052,7 @@ class Program {
 
     static void DisplayStatus(bool authOk, string authError, bool rewardsOk, string rewardsError, bool chatOk, string chatError) {
         WriteColor("=== Twitch Sound Bot with Rewards ===\n", ConsoleColor.Cyan);
+        Console.WriteLine();
         Console.WriteLine($"Канал: {bot.GetChannelName()}");
 
         Console.Write("Авторизация: ");
@@ -1018,6 +1066,8 @@ class Program {
         }
 
         Console.WriteLine($"Количество звуковых команд: {bot.GetTotalCommands()}");
+        Console.WriteLine($"  - Для чата: {bot.GetChatEnabledCount()}");
+        Console.WriteLine($"  - Для наград: {bot.GetRewardEnabledCount()}");
 
         // Показываем отсутствующие файлы
         var missingFiles = bot.GetMissingFiles();
@@ -1057,9 +1107,7 @@ class Program {
         WriteColor("r - Перезагрузить\n", ConsoleColor.White);
         WriteColor("q - Выход\n", ConsoleColor.White);
         Console.WriteLine();
-
     }
-
 
     static void HandlePreferences() {
         bot.ShowPreferences();
