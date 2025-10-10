@@ -11,6 +11,7 @@ using TwitchLib.Api;
 using TwitchLib.Api.Core;
 using TwitchLib.Api.Helix.Models.ChannelPoints;
 using TwitchLib.Api.Helix.Models.ChannelPoints.CreateCustomReward;
+using TwitchLib.Api.Helix.Models.ChannelPoints.UpdateCustomReward;
 using TwitchLib.Client;
 using TwitchLib.Client.Enums;
 using TwitchLib.Client.Events;
@@ -687,89 +688,150 @@ public class TwitchSoundBot {
         try {
             WriteDebug($"=== ДИАГНОСТИКА СОЗДАНИЯ НАГРАД ===\n", ConsoleColor.Cyan);
             WriteDebug($"ChannelId: {channelId}\n", ConsoleColor.Yellow);
-            WriteDebug($"ClientId: {settings.ClientId}\n", ConsoleColor.Yellow);
-            WriteDebug($"Token: {settings.OAuthToken?.Substring(0, Math.Min(15, settings.OAuthToken.Length))}...\n", ConsoleColor.Yellow);
 
-            // Сначала попробуем просто получить список существующих наград
-            WriteDebug($"\n1. Пробуем получить существующие награды...\n", ConsoleColor.White);
-            try {
-                var existingRewards = await api.Helix.ChannelPoints.GetCustomRewardAsync(channelId, new List<string>(), true);
-                WriteDebug($"✅ Успешно! Найдено наград: {existingRewards.Data.Length}\n", ConsoleColor.Green);
+            // Получаем ВСЕ существующие награды канала
+            WriteDebug($"\nПолучаем существующие награды...\n", ConsoleColor.White);
+            var existingRewardsResponse = await api.Helix.ChannelPoints.GetCustomRewardAsync(channelId, new List<string>(), true);
 
-                // Выведем названия существующих наград
-                if (existingRewards.Data.Length > 0) {
-                    WriteDebug($"Существующие награды:\n", ConsoleColor.Yellow);
-                    foreach (var reward in existingRewards.Data) {
-                        WriteDebug($"  - {reward.Title} (ID: {reward.Id})\n", ConsoleColor.Gray);
-                    }
-                }
-            } catch (Exception ex) {
-                WriteDebug($"❌ Ошибка при получении наград: {ex.Message}\n", ConsoleColor.Red);
-                WriteDebug($"Полный stack trace: {ex.ToString()}\n", ConsoleColor.DarkRed);
-                lastRewardsError = $"Не удалось получить список наград: {ex.Message}";
+            if (existingRewardsResponse == null || existingRewardsResponse.Data == null) {
+                lastRewardsError = "Не удалось получить список существующих наград";
                 return false;
             }
 
-            // Теперь попробуем создать награды только для команд с RewardEnabled = true
-            WriteDebug($"\n2. Пробуем создать награды...\n", ConsoleColor.White);
-            var existingRewardsList = await api.Helix.ChannelPoints.GetCustomRewardAsync(channelId, new List<string>());
-            var existingTitles = existingRewardsList.Data.Select(r => r.Title.ToLower()).ToHashSet();
-            int createdCount = 0;
+            var existingRewards = existingRewardsResponse.Data;
+            var existingTitles = existingRewards.Select(r => r.Title.ToLower()).ToHashSet();
 
-            foreach (var soundCommand in soundCommands.Values.Where(c => c.RewardEnabled)) {
-                var rewardTitle = soundCommand.RewardTitle;
+            WriteDebug($"✅ Найдено существующих наград: {existingRewards.Length}\n", ConsoleColor.Green);
 
-                if (existingTitles.Contains(rewardTitle.ToLower())) {
-                    WriteDebug($"✅ Награда '{rewardTitle}' уже существует\n", ConsoleColor.Green);
-                    var existingReward = existingRewardsList.Data.FirstOrDefault(r =>
-                        r.Title.ToLower() == rewardTitle.ToLower());
-                    if (existingReward != null) {
-                        createdRewardIds.Add(existingReward.Id);
-                    }
-                    continue;
-                }
-
-                WriteDebug($"Создаю награду: '{rewardTitle}' за {soundCommand.Cost} очков\n", ConsoleColor.Yellow);
-
-                try {
-                    var request = new CreateCustomRewardsRequest {
-                        Title = rewardTitle,
-                        Cost = soundCommand.Cost,
-                        IsEnabled = true,
-                        BackgroundColor = "#00FF00",
-                        IsUserInputRequired = false,
-                        ShouldRedemptionsSkipRequestQueue = false
-                    };
-
-                    WriteDebug($"  Отправка запроса...\n", ConsoleColor.Gray);
-                    var result = await api.Helix.ChannelPoints.CreateCustomRewardsAsync(channelId, request);
-
-                    if (result != null && result.Data.Length > 0) {
-                        createdRewardIds.Add(result.Data[0].Id);
-                        createdCount++;
-                        WriteDebug($"  ✅ Награда '{rewardTitle}' создана успешно (ID: {result.Data[0].Id})\n", ConsoleColor.Green);
-                    } else {
-                        WriteDebug($"  ❌ Не удалось создать награду '{rewardTitle}' - пустой ответ\n", ConsoleColor.Red);
-                    }
-
-                    await Task.Delay(1000);
-                } catch (Exception ex) {
-                    WriteDebug($"  ❌ Ошибка создания награды '{rewardTitle}': {ex.Message}\n", ConsoleColor.Red);
-                    WriteDebug($"  Stack trace: {ex.ToString()}\n", ConsoleColor.DarkRed);
-                    lastRewardsError = $"Ошибка создания награды '{rewardTitle}': {ex.Message}";
+            // Выводим список существующих наград для отладки
+            if (existingRewards.Length > 0) {
+                WriteDebug($"Существующие награды:\n", ConsoleColor.Yellow);
+                foreach (var reward in existingRewards) {
+                    WriteDebug($"  - '{reward.Title}' (ID: {reward.Id}, Вкл: {reward.IsEnabled})\n", ConsoleColor.Gray);
                 }
             }
 
-            WriteDebug($"\n=== РЕЗУЛЬТАТ: Создано {createdCount} новых наград ===\n",
-                      createdCount > 0 ? ConsoleColor.Green : ConsoleColor.Yellow);
+            int createdCount = 0;
+            int updatedCount = 0;
+            int enabledCount = 0;
 
-            return createdCount > 0 || soundCommands.Count == 0;
+            // Обрабатываем команды с включенными наградами
+            var rewardCommands = soundCommands.Values.Where(c => c.RewardEnabled).ToList();
+            WriteColor($"\nОбрабатываем {rewardCommands.Count} команд с наградами...\n", ConsoleColor.White);
+
+            foreach (var soundCommand in rewardCommands) {
+                var rewardTitle = soundCommand.RewardTitle;
+                WriteDebug($"Обрабатываем: '{rewardTitle}'\n", ConsoleColor.Cyan);
+
+                // Ищем существующую награду
+                var existingReward = existingRewards.FirstOrDefault(r =>
+                    r.Title.ToLower() == rewardTitle.ToLower());
+
+                if (existingReward != null) {
+                    // Награда существует - ОБНОВЛЯЕМ и ВКЛЮЧАЕМ
+                    WriteDebug($"  ✅ Награда существует, обновляю...\n", ConsoleColor.Green);
+
+                    try {
+                        var updateRequest = new UpdateCustomRewardRequest {
+                            Cost = soundCommand.Cost,
+                            IsEnabled = true, // ВКЛЮЧАЕМ награду
+                            GlobalCooldownSeconds = ConvertCooldownToMinutes(soundCommand.Cooldown),
+                            IsGlobalCooldownEnabled = true
+                        };
+
+                        var updatedReward = await api.Helix.ChannelPoints.UpdateCustomRewardAsync(
+                            channelId, existingReward.Id, updateRequest);
+
+                        if (updatedReward != null) {
+                            createdRewardIds.Add(existingReward.Id);
+                            updatedCount++;
+                            WriteColor($"  ✅ Награда '{rewardTitle}' обновлена и включена\n", ConsoleColor.Green);
+                        } else {
+                            WriteColor($"  ⚠️ Не удалось обновить награду '{rewardTitle}'\n", ConsoleColor.Yellow);
+                        }
+                    } catch (Exception ex) {
+                        WriteColor($"  ❌ Ошибка обновления награды '{rewardTitle}': {ex.Message}\n", ConsoleColor.Red);
+                        lastRewardsError = $"Ошибка обновления наград: {ex.Message}";
+                    }
+                } else {
+                    // Награды нет - СОЗДАЕМ новую
+                    WriteDebug($"  ➕ Создаю новую награду...\n", ConsoleColor.Yellow);
+
+                    try {
+                        var request = new CreateCustomRewardsRequest {
+                            Title = rewardTitle,
+                            Cost = soundCommand.Cost,
+                            IsEnabled = true,
+                            BackgroundColor = "#00FF00",
+                            IsUserInputRequired = false,
+                            ShouldRedemptionsSkipRequestQueue = false,
+                            GlobalCooldownSeconds = ConvertCooldownToMinutes(soundCommand.Cooldown),
+                            IsGlobalCooldownEnabled = true
+                        };
+
+                        var result = await api.Helix.ChannelPoints.CreateCustomRewardsAsync(channelId, request);
+
+                        if (result != null && result.Data.Length > 0) {
+                            createdRewardIds.Add(result.Data[0].Id);
+                            createdCount++;
+                            WriteColor($"  ✅ Награда '{rewardTitle}' создана\n", ConsoleColor.Green);
+                        } else {
+                            WriteColor($"  ⚠️ Не удалось создать награду '{rewardTitle}'\n", ConsoleColor.Yellow);
+                        }
+                    } catch (Exception ex) {
+                        WriteColor($"  ❌ Ошибка создания награды '{rewardTitle}': {ex.Message}\n", ConsoleColor.Red);
+                        lastRewardsError = $"Ошибка создания наград: {ex.Message}";
+                    }
+                }
+
+                await Task.Delay(1000); // Задержка между запросами
+            }
+
+            // ВКЛЮЧАЕМ все наши награды (на случай если они были отключены)
+            WriteDebug($"\nВключаем награды...\n", ConsoleColor.White);
+            foreach (var rewardId in createdRewardIds.ToList()) {
+                try {
+                    var updateRequest = new UpdateCustomRewardRequest {
+                        IsEnabled = true
+                    };
+                    await api.Helix.ChannelPoints.UpdateCustomRewardAsync(channelId, rewardId, updateRequest);
+                    enabledCount++;
+                    await Task.Delay(500);
+                } catch (Exception ex) {
+                    WriteDebug($"  ❌ Ошибка включения награды {rewardId}: {ex.Message}\n", ConsoleColor.Red);
+                }
+            }
+
+            WriteDebug($"\n=== РЕЗУЛЬТАТ ===\n", ConsoleColor.Cyan);
+            WriteDebug($"Создано новых: {createdCount}\n", ConsoleColor.Green);
+            WriteDebug($"Обновлено: {updatedCount}\n", ConsoleColor.Yellow);
+            WriteDebug($"Включено: {enabledCount}\n", ConsoleColor.Blue);
+            WriteDebug($"Всего обработано: {rewardCommands.Count}\n", ConsoleColor.White);
+
+            // Успехом считаем если:
+            // - есть команды с наградами И мы обработали хотя бы одну ИЛИ
+            // - нет команд с наградами
+            bool success = (rewardCommands.Count > 0 && (createdCount + updatedCount) > 0) ||
+                          (rewardCommands.Count == 0);
+
+            if (!success) {
+                lastRewardsError = $"Не удалось создать или обновить ни одной награды. " +
+                                 $"Обработано: {createdCount + updatedCount} из {rewardCommands.Count}";
+            }
+
+            return success;
         } catch (Exception ex) {
+            lastRewardsError = $"Критическая ошибка: {ex.Message}";
             WriteDebug($"❌ Критическая ошибка в CreateCustomRewards: {ex.Message}\n", ConsoleColor.Red);
-            WriteDebug($"Full error: {ex.ToString()}\n", ConsoleColor.DarkRed);
-            lastRewardsError = $"Ошибка создания наград: {ex.Message}";
             return false;
         }
+    }
+
+    private int ConvertCooldownToMinutes(int cooldownSeconds) {
+        // Округляем в меньшую сторону до минут
+        int minutes = cooldownSeconds / 60;
+        // Минимальное значение 1 минута, максимальное - 180 минут (3 часа)
+        return Math.Clamp(minutes, 1, 180) * 60; // Возвращаем в секундах
     }
 
     private void ShowSoundList(string channel) {
@@ -841,32 +903,63 @@ public class TwitchSoundBot {
         activeUsers.Remove(username);
     }
 
-    public async Task Disconnect() {
+    public async Task Disconnect(bool disableRewards = true) {
         try {
-            await DeleteCustomRewards();
-        } catch { }
+            if (disableRewards) {
+                await DisableCustomRewards();
+                WriteDebug("Награды отключены\n", ConsoleColor.Yellow);
+            } else {
+                WriteDebug("Награды остаются включенными\n", ConsoleColor.Yellow);
+            }
+        } catch (Exception ex) {
+            WriteDebug($"Ошибка при отключении наград: {ex.Message}\n", ConsoleColor.Red);
+        }
 
         client?.Disconnect();
         pubSub?.Disconnect();
     }
 
-    private async Task DeleteCustomRewards() {
+    private async Task DisableCustomRewards() {
         if (createdRewardIds.Count == 0)
             return;
 
         try {
-            var currentRewards = await api.Helix.ChannelPoints.GetCustomRewardAsync(channelId, new List<string>());
-            var currentRewardIds = currentRewards.Data.Select(r => r.Id).ToHashSet();
+            // Получаем текущие награды по их ID
+            var currentRewards = await api.Helix.ChannelPoints.GetCustomRewardAsync(channelId, createdRewardIds);
 
-            foreach (var rewardId in createdRewardIds.ToList()) {
-                if (currentRewardIds.Contains(rewardId)) {
-                    try {
-                        await api.Helix.ChannelPoints.DeleteCustomRewardAsync(channelId, rewardId);
-                        await Task.Delay(200);
-                    } catch { }
+            foreach (var reward in currentRewards.Data) {
+                try {
+                    var updateRequest = new UpdateCustomRewardRequest {
+                        IsEnabled = false
+                    };
+                    await api.Helix.ChannelPoints.UpdateCustomRewardAsync(channelId, reward.Id, updateRequest);
+                    WriteDebug($"Награда '{reward.Title}' отключена\n", ConsoleColor.Yellow);
+                    await Task.Delay(200);
+                } catch (Exception ex) {
+                    WriteDebug($"Ошибка отключения награды '{reward.Title}': {ex.Message}\n", ConsoleColor.Red);
                 }
             }
-            createdRewardIds.Clear();
+        } catch (Exception ex) {
+            WriteDebug($"Ошибка при отключении наград: {ex.Message}\n", ConsoleColor.Red);
+        }
+    }
+
+    private async Task EnableCustomRewards() {
+        if (createdRewardIds.Count == 0)
+            return;
+
+        try {
+            var currentRewards = await api.Helix.ChannelPoints.GetCustomRewardAsync(channelId, createdRewardIds);
+
+            foreach (var reward in currentRewards.Data) {
+                try {
+                    var updateRequest = new UpdateCustomRewardRequest {
+                        IsEnabled = true
+                    };
+                    await api.Helix.ChannelPoints.UpdateCustomRewardAsync(channelId, reward.Id, updateRequest);
+                    await Task.Delay(200);
+                } catch { }
+            }
         } catch { }
     }
 
@@ -974,6 +1067,7 @@ public class BotSettings {
 class Program {
     private static TwitchSoundBot bot;
     private static bool running = true;
+    private static bool alreadyDisconnected = false;
 
     static async Task Main(string[] args) {
         Console.Title = "Twitch Sound Bot (с) RUTONY 2025";
@@ -1025,7 +1119,7 @@ class Program {
                     case 'К':
                         Console.Clear();
                         WriteColor("Перезагрузка...\n", ConsoleColor.Yellow);
-                        await bot.Disconnect();
+                        await bot.Disconnect(true); // Отключаем награды при перезагрузке
                         bot = new TwitchSoundBot();
                         (authOk, authError, rewardsOk, rewardsError, chatOk, chatError) = await bot.Connect();
                         Console.Clear();
@@ -1036,13 +1130,29 @@ class Program {
                     case 'Q':
                     case 'й':
                     case 'Й':
-                        running = false;
+                        if (!alreadyDisconnected) {
+                            alreadyDisconnected = true;
+                            running = false;
+                            WriteColor("Выход без отключения наград...\n", ConsoleColor.Yellow);
+                            await bot.Disconnect(false);
+                        }
+                        break;
+
+                    case 'w':
+                    case 'W':
+                    case 'ц':
+                    case 'Ц':
+                        if (!alreadyDisconnected) {
+                            alreadyDisconnected = true;
+                            running = false;
+                            WriteColor("Выход с отключением наград...\n", ConsoleColor.Yellow);
+                            await bot.Disconnect(true);
+                        }
                         break;
                 }
             }
 
-            await bot.Disconnect();
-            WriteColor("Отключение...\n", ConsoleColor.Yellow);
+            WriteColor("Программа завершена.\n", ConsoleColor.Yellow);
         } catch (Exception ex) {
             WriteColor($"Ошибка: {ex.Message}\n", ConsoleColor.Red);
             WriteColor("Нажмите любую клавишу...\n", ConsoleColor.Gray);
@@ -1082,8 +1192,14 @@ class Program {
         if (bot.RewardsEnabled) {
             WriteColor(rewardsOk ? "OK" : "Ошибка", rewardsOk ? ConsoleColor.Green : ConsoleColor.Red);
             Console.WriteLine($" ({(bot.RewardsEnabled ? "ВКЛ" : "ВЫКЛ")})");
-            if (!rewardsOk && !string.IsNullOrEmpty(rewardsError)) {
-                WriteColor($"  {rewardsError}\n", ConsoleColor.Yellow);
+            if (!rewardsOk) {
+                // ВЫВОДИМ ДЕТАЛИ ОШИБКИ
+                string errorDetails = bot.GetLastRewardsError();
+                if (!string.IsNullOrEmpty(errorDetails)) {
+                    WriteColor($"  {errorDetails}\n", ConsoleColor.Yellow);
+                } else {
+                    WriteColor($"  Неизвестная ошибка при создании/обновлении наград\n", ConsoleColor.Yellow);
+                }
             }
         } else {
             WriteColor("ВЫКЛ\n", ConsoleColor.Gray);
@@ -1105,6 +1221,7 @@ class Program {
         WriteColor("s - Статистика по командам\n", ConsoleColor.White);
         WriteColor("p - Настройки\n", ConsoleColor.White);
         WriteColor("r - Перезагрузить\n", ConsoleColor.White);
+        WriteColor("w - Выход с отключением наград\n", ConsoleColor.White);
         WriteColor("q - Выход\n", ConsoleColor.White);
         Console.WriteLine();
     }
