@@ -713,6 +713,7 @@ public class TwitchSoundBot {
 
             int createdCount = 0;
             int updatedCount = 0;
+            int skippedCount = 0;
             int enabledCount = 0;
 
             // Обрабатываем команды с включенными наградами
@@ -728,30 +729,63 @@ public class TwitchSoundBot {
                     r.Title.ToLower() == rewardTitle.ToLower());
 
                 if (existingReward != null) {
-                    // Награда существует - ОБНОВЛЯЕМ и ВКЛЮЧАЕМ
-                    WriteDebug($"  ✅ Награда существует, обновляю...\n", ConsoleColor.Green);
+                    // Награда существует - проверяем, нужно ли обновлять
+                    bool needsUpdate = false;
+                    string updateReason = "";
 
-                    try {
-                        var updateRequest = new UpdateCustomRewardRequest {
-                            Cost = soundCommand.Cost,
-                            IsEnabled = true, // ВКЛЮЧАЕМ награду
-                            GlobalCooldownSeconds = ConvertCooldownToMinutes(soundCommand.Cooldown),
-                            IsGlobalCooldownEnabled = true
-                        };
+                    // Проверяем параметры на необходимость обновления
+                    if (existingReward.Cost != soundCommand.Cost) {
+                        needsUpdate = true;
+                        updateReason += $"стоимость ({existingReward.Cost} -> {soundCommand.Cost}) ";
+                    }
 
-                        var updatedReward = await api.Helix.ChannelPoints.UpdateCustomRewardAsync(
-                            channelId, existingReward.Id, updateRequest);
+                    var expectedCooldown = ConvertCooldownToMinutes(soundCommand.Cooldown);
+                    var currentCooldown = existingReward.GlobalCooldownSetting?.GlobalCooldownSeconds ?? 0;
+                    var isCooldownEnabled = existingReward.GlobalCooldownSetting?.IsEnabled ?? false;
 
-                        if (updatedReward != null) {
-                            createdRewardIds.Add(existingReward.Id);
-                            updatedCount++;
-                            WriteColor($"  ✅ Награда '{rewardTitle}' обновлена и включена\n", ConsoleColor.Green);
-                        } else {
-                            WriteColor($"  ⚠️ Не удалось обновить награду '{rewardTitle}'\n", ConsoleColor.Yellow);
+                    if (currentCooldown != expectedCooldown || !isCooldownEnabled) {
+                        needsUpdate = true;
+                        updateReason += $"cooldown ({currentCooldown} -> {expectedCooldown}) ";
+                    }
+
+                    if (existingReward.IsEnabled != true) {
+                        needsUpdate = true;
+                        updateReason += "включение ";
+                    }
+
+                    if (needsUpdate) {
+                        // Награда требует обновления
+                        WriteDebug($"  ✅ Награда существует, обновляю... ({updateReason})\n", ConsoleColor.Green);
+
+                        try {
+                            var updateRequest = new UpdateCustomRewardRequest {
+                                Cost = soundCommand.Cost,
+                                IsEnabled = true,
+                                GlobalCooldownSeconds = expectedCooldown,
+                                IsGlobalCooldownEnabled = true
+                            };
+
+                            var updatedReward = await api.Helix.ChannelPoints.UpdateCustomRewardAsync(
+                                channelId, existingReward.Id, updateRequest);
+
+                            if (updatedReward != null) {
+                                createdRewardIds.Add(existingReward.Id);
+                                updatedCount++;
+                                WriteColor($"  ✅ Награда '{rewardTitle}' обновлена ({updateReason.Trim()})\n", ConsoleColor.Green);
+                            } else {
+                                WriteColor($"  ⚠️ Не удалось обновить награду '{rewardTitle}'\n", ConsoleColor.Yellow);
+                            }
+                        } catch (Exception ex) {
+                            WriteColor($"  ❌ Ошибка обновления награды '{rewardTitle}': {ex.Message}\n", ConsoleColor.Red);
+                            lastRewardsError = $"Ошибка обновления наград: {ex.Message}";
                         }
-                    } catch (Exception ex) {
-                        WriteColor($"  ❌ Ошибка обновления награды '{rewardTitle}': {ex.Message}\n", ConsoleColor.Red);
-                        lastRewardsError = $"Ошибка обновления наград: {ex.Message}";
+
+                        await Task.Delay(1000); // Задержка между запросами обновления
+                    } else {
+                        // Награда уже соответствует настройкам - просто добавляем ID
+                        createdRewardIds.Add(existingReward.Id);
+                        skippedCount++;
+                        WriteDebug($"  ✅ Награда '{rewardTitle}' уже актуальна, пропускаем\n", ConsoleColor.Green);
                     }
                 } else {
                     // Награды нет - СОЗДАЕМ новую
@@ -782,21 +816,24 @@ public class TwitchSoundBot {
                         WriteColor($"  ❌ Ошибка создания награды '{rewardTitle}': {ex.Message}\n", ConsoleColor.Red);
                         lastRewardsError = $"Ошибка создания наград: {ex.Message}";
                     }
-                }
 
-                await Task.Delay(1000); // Задержка между запросами
+                    await Task.Delay(1000); // Задержка между запросами создания
+                }
             }
 
-            // ВКЛЮЧАЕМ все наши награды (на случай если они были отключены)
-            WriteDebug($"\nВключаем награды...\n", ConsoleColor.White);
+            // ВКЛЮЧАЕМ только те награды, которые были отключены и требовали обновления
+            WriteDebug($"\nПроверяем состояние наград...\n", ConsoleColor.White);
             foreach (var rewardId in createdRewardIds.ToList()) {
                 try {
-                    var updateRequest = new UpdateCustomRewardRequest {
-                        IsEnabled = true
-                    };
-                    await api.Helix.ChannelPoints.UpdateCustomRewardAsync(channelId, rewardId, updateRequest);
-                    enabledCount++;
-                    await Task.Delay(500);
+                    var reward = existingRewards.FirstOrDefault(r => r.Id == rewardId);
+                    if (reward != null && !reward.IsEnabled) {
+                        var updateRequest = new UpdateCustomRewardRequest {
+                            IsEnabled = true
+                        };
+                        await api.Helix.ChannelPoints.UpdateCustomRewardAsync(channelId, rewardId, updateRequest);
+                        enabledCount++;
+                        await Task.Delay(500);
+                    }
                 } catch (Exception ex) {
                     WriteDebug($"  ❌ Ошибка включения награды {rewardId}: {ex.Message}\n", ConsoleColor.Red);
                 }
@@ -805,18 +842,19 @@ public class TwitchSoundBot {
             WriteDebug($"\n=== РЕЗУЛЬТАТ ===\n", ConsoleColor.Cyan);
             WriteDebug($"Создано новых: {createdCount}\n", ConsoleColor.Green);
             WriteDebug($"Обновлено: {updatedCount}\n", ConsoleColor.Yellow);
-            WriteDebug($"Включено: {enabledCount}\n", ConsoleColor.Blue);
+            WriteDebug($"Пропущено (актуальных): {skippedCount}\n", ConsoleColor.Blue);
+            WriteDebug($"Включено: {enabledCount}\n", ConsoleColor.Magenta);
             WriteDebug($"Всего обработано: {rewardCommands.Count}\n", ConsoleColor.White);
 
             // Успехом считаем если:
-            // - есть команды с наградами И мы обработали хотя бы одну ИЛИ
+            // - есть команды с наградами И мы обработали все ИЛИ
             // - нет команд с наградами
-            bool success = (rewardCommands.Count > 0 && (createdCount + updatedCount) > 0) ||
+            bool success = (rewardCommands.Count > 0 && (createdCount + updatedCount + skippedCount) == rewardCommands.Count) ||
                           (rewardCommands.Count == 0);
 
             if (!success) {
-                lastRewardsError = $"Не удалось создать или обновить ни одной награды. " +
-                                 $"Обработано: {createdCount + updatedCount} из {rewardCommands.Count}";
+                lastRewardsError = $"Не удалось обработать все награды. " +
+                                 $"Обработано: {createdCount + updatedCount + skippedCount} из {rewardCommands.Count}";
             }
 
             return success;
