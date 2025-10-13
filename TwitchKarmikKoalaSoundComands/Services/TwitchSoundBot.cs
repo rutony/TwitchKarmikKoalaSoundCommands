@@ -252,7 +252,13 @@ public class TwitchSoundBot {
     private void WriteColor(string text, ConsoleColor color) {
         var originalColor = Console.ForegroundColor;
         Console.ForegroundColor = color;
-        Console.Write(text);
+        foreach (var ch in text) {
+            try {
+                Console.Write(ch);
+            } catch {
+                Console.Write('?');
+            }
+        }
         Console.ForegroundColor = originalColor;
     }
 }

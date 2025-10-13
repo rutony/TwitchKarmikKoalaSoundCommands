@@ -9,6 +9,13 @@ class Program {
     static async Task Main(string[] args) {
         Console.Title = "Twitch Sound Bot (с) RUTONY 2025";
 
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+
+        try {
+            Console.InputEncoding = System.Text.Encoding.UTF8;
+        } catch {
+        }
+
         try {
             bot = new TwitchSoundBot();
 
@@ -90,7 +97,7 @@ class Program {
 
             WriteColor("Программа завершена.\n", ConsoleColor.Yellow);
         } catch (Exception ex) {
-            WriteColor($"Ошибка: {ex.Message}\n", ConsoleColor.Red);
+            WriteColor($"❌ Ошибка: {ex.Message}\n", ConsoleColor.Red);
             WriteColor("Нажмите любую клавишу...\n", ConsoleColor.Gray);
             Console.ReadKey();
         }
@@ -103,9 +110,9 @@ class Program {
 
         Console.Write("Авторизация: ");
         if (authOk) {
-            WriteColor("OK\n", ConsoleColor.Green);
+            WriteColor("✅ OK\n", ConsoleColor.Green);
         } else {
-            WriteColor("Ошибка\n", ConsoleColor.Red);
+            WriteColor("❌ Ошибка\n", ConsoleColor.Red);
             if (!string.IsNullOrEmpty(authError)) {
                 WriteColor($"  {authError}\n", ConsoleColor.Yellow);
             }
@@ -125,7 +132,7 @@ class Program {
 
         Console.Write("Награды: ");
         if (bot.RewardsEnabled) {
-            WriteColor(rewardsOk ? "OK" : "Ошибка", rewardsOk ? ConsoleColor.Green : ConsoleColor.Red);
+            WriteColor(rewardsOk ? "✅ OK" : "❌ Ошибка", rewardsOk ? ConsoleColor.Green : ConsoleColor.Red);
             Console.WriteLine($" ({(bot.RewardsEnabled ? "ВКЛ" : "ВЫКЛ")})");
             if (!rewardsOk) {
                 string errorDetails = bot.GetLastRewardsError();
@@ -141,7 +148,7 @@ class Program {
 
         Console.Write("Команды в чате: ");
         if (bot.ChatEnabled) {
-            WriteColor(chatOk ? "OK" : "Ошибка", chatOk ? ConsoleColor.Green : ConsoleColor.Red);
+            WriteColor(chatOk ? "✅ OK" : "❌ Ошибка", chatOk ? ConsoleColor.Green : ConsoleColor.Red);
             Console.WriteLine($" ({(bot.ChatEnabled ? "ВКЛ" : "ВЫКЛ")})");
             if (!chatOk && !string.IsNullOrEmpty(chatError)) {
                 WriteColor($"  {chatError}\n", ConsoleColor.Yellow);
@@ -152,11 +159,11 @@ class Program {
 
         Console.WriteLine($"Всего использований: {bot.GetTotalUsage()}");
         Console.WriteLine();
-        WriteColor("s - Статистика по командам\n", ConsoleColor.White);
-        WriteColor("p - Настройки\n", ConsoleColor.White);
-        WriteColor("r - Перезагрузить\n", ConsoleColor.White);
-        WriteColor("w - Выход с отключением наград\n", ConsoleColor.White);
-        WriteColor("q - Выход\n", ConsoleColor.White);
+        WriteColor("s - Статистика по командам\n", ConsoleColor.DarkGray);
+        WriteColor("p - Настройки\n", ConsoleColor.DarkGray);
+        WriteColor("r - Перезагрузить\n", ConsoleColor.DarkGray);
+        WriteColor("w - Выход с отключением наград\n", ConsoleColor.DarkGray);
+        WriteColor("q - Выход\n", ConsoleColor.DarkGray);
         Console.WriteLine();
     }
 
