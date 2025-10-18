@@ -102,6 +102,24 @@ public class SettingsManager {
                             if (int.TryParse(value, out int vipStealBanTime))
                                 Settings.VipStealBanTime = vipStealBanTime;
                             break;
+
+                        case "music_tracker_enabled":
+                            if (bool.TryParse(value, out bool musicTrackerEnabled))
+                                Settings.MusicTrackerEnabled = musicTrackerEnabled;
+                            break;
+                        case "music_tracker_port":
+                            if (int.TryParse(value, out int musicTrackerPort))
+                                Settings.MusicTrackerPort = musicTrackerPort;
+                            break;
+                        case "music_command_keywords":
+                            Settings.MusicCommandKeywords = value;
+                            break;
+                        case "music_response_template":
+                            Settings.MusicResponseTemplate = value;
+                            break;
+                        case "no_music_response_template":
+                            Settings.NoMusicResponseTemplate = value;
+                            break;
                     }
                 }
             }
@@ -150,7 +168,14 @@ public class SettingsManager {
                 $"enable_vip_steal_reward={Settings.EnableVipStealReward}",
                 $"vip_steal_cost={Settings.VipStealCost}",
                 $"vip_steal_chance={Settings.VipStealChance}",
-                $"vip_steal_ban_time={Settings.VipStealBanTime}"
+                $"vip_steal_ban_time={Settings.VipStealBanTime}",
+                "",
+                "# Настройки музыки:",
+                $"music_tracker_enabled={Settings.MusicTrackerEnabled}",
+                $"music_tracker_port={Settings.MusicTrackerPort}",
+                $"music_command_keywords={Settings.MusicCommandKeywords}",
+                $"music_response_template={Settings.MusicResponseTemplate}",
+                $"no_music_response_template={Settings.NoMusicResponseTemplate}"
             };
 
             File.WriteAllLines(settingsFile, lines);
@@ -187,7 +212,14 @@ public class SettingsManager {
             "enable_vip_steal_reward=false",
             "vip_steal_cost=50000",
             "vip_steal_chance=5", // в процентах
-            "vip_steal_ban_time=180" // в минутах
+            "vip_steal_ban_time=180", // в минутах
+            "",
+            "# Настройки музыки:",
+            "music_tracker_enabled=true",
+            "music_tracker_port=8080",
+            "music_command_keywords=!music;!музыка;!song;!track;!трек",
+            "music_response_template=$name, сейчас играет: $trackName $trackLink",
+            "no_music_response_template=$name, сейчас ничего не играет"
         };
 
         File.WriteAllLines(settingsFile, defaultSettings);

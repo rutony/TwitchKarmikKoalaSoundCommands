@@ -19,6 +19,9 @@ public class TwitchBot {
 
     private VipManager vipManager;
 
+    private readonly MusicTrackerService musicTracker;
+    private readonly List<string> musicKeywords;
+
     public TwitchBot() {
         settingsManager = new SettingsManager();
         commandManager = new CommandManager(settingsManager.Settings);
@@ -35,6 +38,10 @@ public class TwitchBot {
         connectionManager.OnRewardMappingUpdated += HandleRewardMapping;
 
         vipManager = null;
+
+        musicTracker = new MusicTrackerService(settingsManager.Settings);
+        musicKeywords = new List<string>();
+        LoadMusicKeywords();
     }
 
     private void InitializeApi() {
@@ -62,6 +69,10 @@ public class TwitchBot {
 
         if (vipManager == null) {
             vipManager = new VipManager(connectionManager.Api, connectionManager.ChannelId, settingsManager.Settings);
+        }
+
+        if (settingsManager.Settings.MusicTrackerEnabled) {
+            musicTracker.Start();
         }
 
         try {
@@ -141,16 +152,33 @@ public class TwitchBot {
         return result;
     }
 
-    private void HandleChatCommand(object sender, (string username, string message) args) {
+    private void LoadMusicKeywords() {
+        musicKeywords.Clear();
+        var keywords = settingsManager.Settings.MusicCommandKeywords
+            .Split(new[] { ';', ',', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+
+        foreach (var keyword in keywords) {
+            var trimmedKeyword = keyword.Trim().ToLower();
+            if (!string.IsNullOrEmpty(trimmedKeyword)) {
+                musicKeywords.Add(trimmedKeyword);
+            }
+        }
+
+        if (settingsManager.Settings.DebugMode) {
+            WriteColor($"🎵 Загружено музыкальных ключевых слов: {musicKeywords.Count}\n", ConsoleColor.Cyan);
+        }
+    }
+
+    private async void HandleChatCommand(object sender, (string username, string message) args) {
         if (!settingsManager.Settings.ChatEnabled)
             return;
 
         var message = args.message.ToLower();
         var username = args.username;
 
-        // Обрабатываем специальные команды
-        if (message == "!звуки" || message == "!sounds") {
-            // Показываем список команд (можно добавить логику)
+        // Проверяем музыкальные команды
+        if (musicKeywords.Contains(message)) {
+            await HandleMusicCommand(username);
             return;
         }
 
@@ -161,6 +189,33 @@ public class TwitchBot {
                     WriteColor($"🔊 Активирована команда чата: {message} пользователем {username}\n", ConsoleColor.Cyan);
                 }
                 audioPlayer.PlaySound(command.SoundFile, username, message);
+            }
+        }
+    }
+
+    private async Task HandleMusicCommand(string username) {
+        try {
+            var currentTrack = musicTracker.GetCurrentTrack();
+            string response;
+
+            if (currentTrack != null && !string.IsNullOrEmpty(currentTrack.Name)) {
+                response = settingsManager.Settings.MusicResponseTemplate
+                    .Replace("$name", username)
+                    .Replace("$trackName", currentTrack.Name)
+                    .Replace("$trackLink", string.IsNullOrEmpty(currentTrack.Link) ? "" : currentTrack.Link);
+            } else {
+                response = settingsManager.Settings.NoMusicResponseTemplate
+                    .Replace("$name", username);
+            }
+
+            connectionManager.SendMessage(response);
+
+            if (settingsManager.Settings.DebugMode) {
+                WriteColor($"🎵 Обработана музыкальная команда для {username}: {response}\n", ConsoleColor.Cyan);
+            }
+        } catch (Exception ex) {
+            if (settingsManager.Settings.DebugMode) {
+                WriteColor($"❌ Ошибка обработки музыкальной команды: {ex.Message}\n", ConsoleColor.Red);
             }
         }
     }
@@ -357,6 +412,8 @@ public class TwitchBot {
                 await rewardManager.DisableCustomRewards();
             }
         }
+
+        musicTracker.Stop();
 
         await connectionManager.Disconnect(false);
     }
