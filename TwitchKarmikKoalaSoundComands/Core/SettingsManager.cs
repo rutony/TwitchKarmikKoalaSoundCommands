@@ -69,6 +69,39 @@ public class SettingsManager {
                             if (int.TryParse(value, out int volume))
                                 Settings.Volume = Math.Clamp(volume, 0, 100);
                             break;
+
+                        case "enable_vip_reward":
+                            if (bool.TryParse(value, out bool enableVipReward))
+                                Settings.EnableVipReward = enableVipReward;
+                            break;
+                        case "vip_reward_cost":
+                            if (int.TryParse(value, out int vipRewardCost))
+                                Settings.VipRewardCost = vipRewardCost;
+                            break;
+                        case "vip_cooldown":
+                            if (int.TryParse(value, out int vipCooldown))
+                                Settings.VipCooldown = vipCooldown;
+                            break;
+                        case "vip_duration_days":
+                            if (int.TryParse(value, out int vipDurationDays))
+                                Settings.VipDurationDays = vipDurationDays;
+                            break;
+                        case "enable_vip_steal_reward":
+                            if (bool.TryParse(value, out bool enableVipStealReward))
+                                Settings.EnableVipStealReward = enableVipStealReward;
+                            break;
+                        case "vip_steal_cost":
+                            if (int.TryParse(value, out int vipStealCost))
+                                Settings.VipStealCost = vipStealCost;
+                            break;
+                        case "vip_steal_chance":
+                            if (int.TryParse(value, out int vipStealChance))
+                                Settings.VipStealChance = vipStealChance;
+                            break;
+                        case "vip_steal_ban_time":
+                            if (int.TryParse(value, out int vipStealBanTime))
+                                Settings.VipStealBanTime = vipStealBanTime;
+                            break;
                     }
                 }
             }
@@ -105,7 +138,19 @@ public class SettingsManager {
                 $"chat_enabled={Settings.ChatEnabled}",
                 $"rewards_enabled={Settings.RewardsEnabled}",
                 $"debug_mode={Settings.DebugMode}",
-                $"volume={Settings.Volume}"
+                $"volume={Settings.Volume}",
+                "",
+                "# Настройки VIP:",
+                $"enable_vip_reward={Settings.EnableVipReward}",
+                $"vip_reward_cost={Settings.VipRewardCost}",
+                $"vip_cooldown={Settings.VipCooldown}",
+                $"vip_duration_days={Settings.VipDurationDays}",
+                "",
+                "# Настройки кражи VIP:",
+                $"enable_vip_steal_reward={Settings.EnableVipStealReward}",
+                $"vip_steal_cost={Settings.VipStealCost}",
+                $"vip_steal_chance={Settings.VipStealChance}",
+                $"vip_steal_ban_time={Settings.VipStealBanTime}"
             };
 
             File.WriteAllLines(settingsFile, lines);
@@ -130,7 +175,19 @@ public class SettingsManager {
             "chat_enabled=true",
             "rewards_enabled=true",
             "debug_mode=false",
-            "volume=50"
+            "volume=50",
+            "",
+            "# Настройки Покупки VIP:",
+            "enable_vip_reward=false",
+            "vip_reward_cost=150000",
+            "vip_cooldown=10", // в минутах
+            "vip_duration_days=30",
+            "",
+            "# Настройки Кражи VIP:",
+            "enable_vip_steal_reward=false",
+            "vip_steal_cost=50000",
+            "vip_steal_chance=5", // в процентах
+            "vip_steal_ban_time=180" // в минутах
         };
 
         File.WriteAllLines(settingsFile, defaultSettings);

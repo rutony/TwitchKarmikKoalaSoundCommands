@@ -14,7 +14,8 @@ public class TwitchConnectionManager {
     private TwitchAPI api;
     private TwitchPubSub pubSub;
     private BotSettings settings;
-    private string channelId;
+    private string? channelId;
+    private string? botId;
 
     public event EventHandler<(string username, string message)> OnChatCommand;
     public event EventHandler<(string command, string username)> OnRewardRedeemed;
@@ -32,8 +33,63 @@ public class TwitchConnectionManager {
         rewardIdToCommandMap = new Dictionary<string, string>();
     }
 
+    public async Task ReinitializeApi() {
+        if (api != null) {
+            api.Settings.ClientId = settings.ClientId;
+
+            string apiToken = settings.OAuthToken;
+            if (apiToken.StartsWith("oauth:")) {
+                apiToken = apiToken.Substring(6);
+            }
+            api.Settings.AccessToken = apiToken;
+        }
+    }
+
+    public void SendMessage(string message) {
+        if (client != null && client.IsConnected) {
+            client.SendMessage(settings.ChannelName, message);
+        }
+    }
+
+    public async Task BanUser(string username, int durationMinutes) {
+        try {
+            // Получаем ID пользователя
+            var users = await api.Helix.Users.GetUsersAsync(logins: new List<string> { username });
+            if (users.Users.Length == 0) {
+                WriteDebug($"❌ Пользователь {username} не найден\n", ConsoleColor.Red);
+                return;
+            }
+
+            var userId = users.Users[0].Id;
+
+            // Используем broadcasterId как moderatorId, так как это один и тот же аккаунт
+            var banRequest = new TwitchLib.Api.Helix.Models.Moderation.BanUser.BanUserRequest {
+                UserId = userId,
+                Duration = durationMinutes * 60,
+                Reason = "Неудачная попытка кражи VIP"
+            };
+
+            await api.Helix.Moderation.BanUserAsync(
+                broadcasterId: channelId,
+                moderatorId: channelId, // используем channelId как moderatorId
+                banUserRequest: banRequest
+            );
+
+            if (settings.DebugMode) {
+                WriteDebug($"🔨 Пользователь {username} забанен на {durationMinutes} минут\n", ConsoleColor.Red);
+            }
+        } catch (Exception ex) {
+            WriteDebug($"❌ Ошибка бана пользователя {username}: {ex.Message}\n", ConsoleColor.Red);
+        }
+    }
+
     public async Task<(bool authOk, string authError, bool rewardsOk, string rewardsError, bool chatOk, string chatError)> Connect() {
-        api = new TwitchAPI();
+        
+        if (api == null) {
+            api = new TwitchAPI();
+        }
+        await ReinitializeApi();
+
         api.Settings.ClientId = settings.ClientId;
 
         string apiToken = settings.OAuthToken;
@@ -42,23 +98,48 @@ public class TwitchConnectionManager {
         }
         api.Settings.AccessToken = apiToken;
 
+        // Получаем ID бота и канала
         string authError = "";
         try {
-            var users = await api.Helix.Users.GetUsersAsync(logins: new List<string> { settings.ChannelName });
-            if (users.Users.Length > 0) {
-                channelId = users.Users[0].Id;
+            // Получаем ID бота
+            var botUsers = await api.Helix.Users.GetUsersAsync(logins: new List<string> { settings.BotUsername });
+            if (botUsers.Users.Length > 0) {
+                botId = botUsers.Users[0].Id;
                 if (settings.DebugMode) {
-                    WriteDebug($"✅ Успешно! Получен channelId: {channelId} для канала {settings.ChannelName}\n", ConsoleColor.Green);
+                    WriteDebug($"✅ Получен botId: {botId} для бота {settings.BotUsername}\n", ConsoleColor.Green);
+                }
+            }
+
+            // Получаем ID канала
+            var channelUsers = await api.Helix.Users.GetUsersAsync(logins: new List<string> { settings.ChannelName });
+            if (channelUsers.Users.Length > 0) {
+                channelId = channelUsers.Users[0].Id;
+                if (settings.DebugMode) {
+                    WriteDebug($"✅ Получен channelId: {channelId} для канала {settings.ChannelName}\n", ConsoleColor.Green);
                 }
             } else {
                 authError = $"Канал {settings.ChannelName} не найден";
                 return (false, authError, false, "", false, "");
             }
+
+            // Дополнительная проверка аутентификации
+            try {
+                var validation = await api.Auth.ValidateAccessTokenAsync(api.Settings.AccessToken);
+                if (validation != null) {
+                    WriteDebug($"✅ Аутентификация подтверждена: {validation.UserId}\n", ConsoleColor.Green);
+                }
+            } catch (Exception authEx) {
+                WriteDebug($"❌ Ошибка аутентификации: {authEx.Message}\n", ConsoleColor.Red);
+            }
+
         } catch (Exception ex) {
-            authError = $"Ошибка получения channelId: {ex.Message}";
+            authError = $"Ошибка получения ID: {ex.Message}";
             WriteDebug($"❌ Ошибка: {authError}\n", ConsoleColor.Red);
             return (false, authError, false, "", false, "");
         }
+
+        WriteDebug($"🔍 Диагностика: BotUsername='{settings.BotUsername}', ChannelName='{settings.ChannelName}'\n", ConsoleColor.Yellow);
+        WriteDebug($"🔍 Диагностика: BotId='{botId}', ChannelId='{channelId}'\n", ConsoleColor.Yellow);
 
         bool chatOk = false;
         bool rewardsOk = false;
@@ -151,13 +232,20 @@ public class TwitchConnectionManager {
             return;
 
         if (settings.DebugMode) {
-            WriteDebug($"🎁 Активирована награда: {e.RewardTitle} пользователем {e.DisplayName}\n", ConsoleColor.Magenta);
+            WriteDebug($"🎁 Активирована награда: '{e.RewardTitle}' пользователем {e.DisplayName}\n", ConsoleColor.Magenta);
         }
 
+        // Сначала проверяем маппинг по ID
         if (rewardIdToCommandMap.TryGetValue(e.RewardId.ToString(), out string command)) {
             OnRewardRedeemed?.Invoke(this, (command, e.DisplayName));
+        }
+        // Затем проверяем VIP награды по названию
+        else if (e.RewardTitle == "Купить VIP") {
+            OnRewardRedeemed?.Invoke(this, ("VIP_PURCHASE", e.DisplayName));
+        } else if (e.RewardTitle == "Украсть VIP") {
+            OnRewardRedeemed?.Invoke(this, ("VIP_STEAL", e.DisplayName));
         } else {
-            // Если не нашли по ID, попробуем найти по названию
+            // Если не нашли по ID, пробуем найти по названию для обычных команд
             OnRewardMappingUpdated?.Invoke(this, (e.RewardId.ToString(), e.RewardTitle));
         }
     }

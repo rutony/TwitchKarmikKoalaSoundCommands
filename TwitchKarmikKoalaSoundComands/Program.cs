@@ -2,7 +2,7 @@
 using System.Threading.Tasks;
 
 class Program {
-    private static TwitchSoundBot bot;
+    private static TwitchBot bot;
     private static bool running = true;
     private static bool alreadyDisconnected = false;
 
@@ -17,7 +17,7 @@ class Program {
         }
 
         try {
-            bot = new TwitchSoundBot();
+            bot = new TwitchBot();
 
             WriteColor("=== Twitch Sound Bot with Rewards ===\n", ConsoleColor.Cyan);
             WriteColor("Подключение...\n", ConsoleColor.Yellow);
@@ -62,11 +62,30 @@ class Program {
                     case 'К':
                         Console.Clear();
                         WriteColor("Перезагрузка...\n", ConsoleColor.Yellow);
-                        await bot.Disconnect(true);
-                        bot = new TwitchSoundBot();
-                        (authOk, authError, rewardsOk, rewardsError, chatOk, chatError) = await bot.Connect();
-                        Console.Clear();
-                        DisplayStatus(authOk, authError, rewardsOk, rewardsError, chatOk, chatError);
+
+                        try {
+                            // Сохраняем текущие настройки
+                            var currentSettings = bot.GetCurrentSettings();
+
+                            // Отключаем без деактивации наград
+                            await bot.Disconnect(false);
+
+                            // Небольшая пауза для очистки
+                            await Task.Delay(1000);
+
+                            // Создаем полностью новый экземпляр
+                            bot = new TwitchBot();
+
+                            // Переподключаем
+                            (authOk, authError, rewardsOk, rewardsError, chatOk, chatError) = await bot.Connect();
+
+                            Console.Clear();
+                            DisplayStatus(authOk, authError, rewardsOk, rewardsError, chatOk, chatError);
+                        } catch (Exception ex) {
+                            WriteColor($"❌ Ошибка перезагрузки: {ex.Message}\n", ConsoleColor.Red);
+                            WriteColor("Нажмите любую клавишу для продолжения...\n", ConsoleColor.Yellow);
+                            Console.ReadKey();
+                        }
                         break;
 
                     case 'q':
@@ -157,8 +176,20 @@ class Program {
             WriteColor("ВЫКЛ\n", ConsoleColor.Gray);
         }
 
-        Console.WriteLine($"Всего использований: {bot.GetTotalUsage()}");
+        Console.WriteLine($"Всего использований голосовых команд: {bot.GetTotalUsage()}");
         Console.WriteLine();
+
+        // Статус VIP наград
+        Console.Write("Покупка VIP: ");
+        WriteColor(bot.VipRewardEnabled ? "ВКЛ" : "ВЫКЛ", bot.VipRewardEnabled ? ConsoleColor.Green : ConsoleColor.Gray);
+        Console.WriteLine();
+
+        Console.Write("Воровство VIP: ");
+        WriteColor(bot.VipStealEnabled ? "ВКЛ" : "ВЫКЛ", bot.VipStealEnabled ? ConsoleColor.Green : ConsoleColor.Gray);
+        Console.WriteLine();
+        Console.WriteLine();
+        Console.WriteLine();
+
         WriteColor("s - Статистика по командам\n", ConsoleColor.DarkGray);
         WriteColor("p - Настройки\n", ConsoleColor.DarkGray);
         WriteColor("r - Перезагрузить\n", ConsoleColor.DarkGray);
@@ -180,6 +211,16 @@ class Program {
 
                 case '2':
                     bot.ToggleRewards();
+                    bot.ShowPreferences();
+                    break;
+
+                case '3':
+                    bot.ToggleVipReward();
+                    bot.ShowPreferences();
+                    break;
+
+                case '4':
+                    bot.ToggleVipStealReward();
                     bot.ShowPreferences();
                     break;
 
