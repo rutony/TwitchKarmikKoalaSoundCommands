@@ -276,8 +276,8 @@ public class TwitchBot {
         }
     }
 
-    private void HandleVipPurchase(string username) {
-        if (vipManager.PurchaseVip(username)) {
+    private async void HandleVipPurchase(string username) {
+        if (await vipManager.PurchaseVip(username)) {
             // Записываем статистику
             statisticsDisplay.RecordVipPurchase(username);
 

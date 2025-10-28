@@ -74,27 +74,20 @@ public class StatisticsDisplay {
         }
     }
 
-    private void UpdateStatistics() {
+    private async void UpdateStatistics() {
         try {
-            // Проверяем, что менеджеры инициализированы
-            if (_vipManager == null) {
-                if (_settings.DebugMode) {
-                    WriteColor("⚠️ VipManager не инициализирован\n", ConsoleColor.Yellow);
-                }
-                return;
-            }
-
             // Обновляем статистику VIP
-            try {
-                VipCount = _vipManager.GetVipUsers().Count;
-            } catch (Exception ex) {
-                if (_settings.DebugMode) {
-                    WriteColor($"⚠️ Ошибка получения VIP статистики: {ex.Message}\n", ConsoleColor.Yellow);
+            if (_vipManager != null) {
+                try {
+                    VipCount = await _vipManager.GetActiveVipCountAsync(); // Используем асинхронный метод
+                } catch (Exception ex) {
+                    if (_settings.DebugMode) {
+                        WriteColor($"⚠️ Ошибка получения VIP статистики: {ex.Message}\n", ConsoleColor.Yellow);
+                    }
+                    // Fallback на синхронный метод в случае ошибки
+                    VipCount = _vipManager.GetActiveVipCount();
                 }
             }
-
-            // Статистика будет обновляться через события
-            // Основные данные берем из существующих менеджеров
         } catch (Exception ex) {
             if (_settings.DebugMode) {
                 WriteColor($"❌ Ошибка получения статистики: {ex.Message}\n", ConsoleColor.Red);
@@ -122,7 +115,7 @@ public class StatisticsDisplay {
             if (_vipManager != null) {
                 LastVipPurchase = username;
                 LastVipPurchaseTime = DateTime.Now;
-                VipCount = _vipManager.GetVipUsers().Count;
+                VipCount = _vipManager.GetActiveVipCount(); // Используем новый метод
             }
         } catch (Exception ex) {
             if (_settings.DebugMode) {
@@ -144,7 +137,7 @@ public class StatisticsDisplay {
                     LastFailedStealer = thiefName;
                 }
 
-                VipCount = _vipManager.GetVipUsers().Count;
+                VipCount = _vipManager.GetActiveVipCount(); // Используем новый метод
             }
         } catch (Exception ex) {
             if (_settings.DebugMode) {
@@ -188,9 +181,9 @@ public class StatisticsDisplay {
             }
             Console.WriteLine();
 
-            // VIP статистика
+            // VIP статистика - ИСПРАВЛЕНО: используем актуальное количество VIP
             Console.Write("⭐ VIP на канале: ");
-            WriteColor($"{VipCount}/5", ConsoleColor.Magenta);
+            WriteColor($"{VipCount}/100", ConsoleColor.Magenta); // Изменено с 5 на 100
             Console.WriteLine();
             Console.Write("   Последняя покупка: ");
             WriteColor(LastVipPurchase, ConsoleColor.Green);
