@@ -6,6 +6,10 @@ class Program {
     private static bool running = true;
     private static bool alreadyDisconnected = false;
 
+    private static Timer interfaceUpdateTimer;
+    public static bool IsInterfaceActive { get; private set; } = true;
+    private static bool interfaceUpdateRequested = false;
+
     static async Task Main(string[] args) {
         Console.Title = "Twitch Sound Bot (с) RUTONY 2025";
 
@@ -19,7 +23,6 @@ class Program {
         try {
             bot = new TwitchBot();
 
-            WriteColor("=== Twitch Sound Bot with Rewards ===\n", ConsoleColor.Cyan);
             WriteColor("Подключение...\n", ConsoleColor.Yellow);
 
             var (authOk, authError, rewardsOk, rewardsError, chatOk, chatError) = await bot.Connect();
@@ -29,6 +32,9 @@ class Program {
                 Console.WriteLine("Нажмите любую клавишу чтобы продолжить...");
                 Console.ReadKey();
             }
+
+            // Запускаем таймер для обновления интерфейса
+            StartInterfaceUpdateTimer();
 
             Console.Clear();
             DisplayStatus(authOk, authError, rewardsOk, rewardsError, chatOk, chatError);
@@ -41,8 +47,10 @@ class Program {
                     case 'S':
                     case 'ы':
                     case 'Ы':
+                        IsInterfaceActive = false;
                         bot.ShowStatistics();
                         WaitForBack();
+                        IsInterfaceActive = true;
                         Console.Clear();
                         DisplayStatus(authOk, authError, rewardsOk, rewardsError, chatOk, chatError);
                         break;
@@ -51,7 +59,9 @@ class Program {
                     case 'P':
                     case 'з':
                     case 'З':
+                        IsInterfaceActive = false;
                         HandlePreferences();
+                        IsInterfaceActive = true;
                         Console.Clear();
                         DisplayStatus(authOk, authError, rewardsOk, rewardsError, chatOk, chatError);
                         break;
@@ -60,12 +70,16 @@ class Program {
                     case 'R':
                     case 'к':
                     case 'К':
+                        IsInterfaceActive = false;
                         Console.Clear();
                         WriteColor("Перезагрузка...\n", ConsoleColor.Yellow);
 
                         try {
-                            // Сохраняем текущие настройки
-                            var currentSettings = bot.GetCurrentSettings();
+                            // Останавливаем таймер
+                            interfaceUpdateTimer?.Dispose();
+
+                            // Останавливаем статистику перед перезагрузкой
+                            bot.StopStatistics();
 
                             // Отключаем без деактивации наград
                             await bot.Disconnect(false);
@@ -79,6 +93,10 @@ class Program {
                             // Переподключаем
                             (authOk, authError, rewardsOk, rewardsError, chatOk, chatError) = await bot.Connect();
 
+                            // Перезапускаем таймер
+                            StartInterfaceUpdateTimer();
+
+                            IsInterfaceActive = true;
                             Console.Clear();
                             DisplayStatus(authOk, authError, rewardsOk, rewardsError, chatOk, chatError);
                         } catch (Exception ex) {
@@ -93,8 +111,10 @@ class Program {
                     case 'й':
                     case 'Й':
                         if (!alreadyDisconnected) {
+                            IsInterfaceActive = false;
                             alreadyDisconnected = true;
                             running = false;
+                            interfaceUpdateTimer?.Dispose();
                             WriteColor("Выход без отключения наград...\n", ConsoleColor.Yellow);
                             await bot.Disconnect(false);
                         }
@@ -105,15 +125,23 @@ class Program {
                     case 'ц':
                     case 'Ц':
                         if (!alreadyDisconnected) {
+                            IsInterfaceActive = false;
                             alreadyDisconnected = true;
                             running = false;
+                            interfaceUpdateTimer?.Dispose();
                             WriteColor("Выход с отключением наград...\n", ConsoleColor.Yellow);
                             await bot.Disconnect(true);
                         }
                         break;
+                    default:
+                        // При нажатии любой другой клавиши обновляем отображение
+                        Console.Clear();
+                        DisplayStatus(authOk, authError, rewardsOk, rewardsError, chatOk, chatError);
+                        break;
                 }
             }
 
+            interfaceUpdateTimer?.Dispose();
             WriteColor("Программа завершена.\n", ConsoleColor.Yellow);
         } catch (Exception ex) {
             WriteColor($"❌ Ошибка: {ex.Message}\n", ConsoleColor.Red);
@@ -122,10 +150,36 @@ class Program {
         }
     }
 
+    private static void StartInterfaceUpdateTimer() {
+        interfaceUpdateTimer = new Timer(_ => {
+            if (interfaceUpdateRequested && IsInterfaceActive) {
+                interfaceUpdateRequested = false;
+                // В консольных приложениях сложно обновить интерфейс без перерисовки
+                // Поэтому просто перерисовываем весь интерфейс при событиях
+                if (bot != null) {
+                    var settings = bot.GetCurrentSettings();
+                    var (authOk, authError, rewardsOk, rewardsError, chatOk, chatError) =
+                        (true, "", true, "", true, ""); // Упрощенные значения для перерисовки
+
+                    Console.Clear();
+                    DisplayStatus(authOk, authError, rewardsOk, rewardsError, chatOk, chatError);
+                }
+            }
+        }, null, 0, 1000); // Проверяем каждую секунду
+    }
+
+    public static void RequestInterfaceUpdate() {
+        interfaceUpdateRequested = true;
+    }
+
     static void DisplayStatus(bool authOk, string authError, bool rewardsOk, string rewardsError, bool chatOk, string chatError) {
-        WriteColor("=== Twitch Sound Bot with Rewards ===\n", ConsoleColor.Cyan);
-        Console.WriteLine();
+        Console.Clear(); // Полностью очищаем консоль
+
+        int currentLine = 0;
+
+        // Выводим основную информацию
         Console.WriteLine($"Канал: {bot.GetChannelName()}");
+        currentLine++;
 
         Console.Write("Авторизация: ");
         if (authOk) {
@@ -136,17 +190,21 @@ class Program {
                 WriteColor($"  {authError}\n", ConsoleColor.Yellow);
             }
         }
+        currentLine++;
 
         Console.WriteLine($"Количество звуковых команд: {bot.GetTotalCommands()}");
         Console.WriteLine($"  - Для чата: {bot.GetChatEnabledCount()}");
         Console.WriteLine($"  - Для наград: {bot.GetRewardEnabledCount()}");
+        currentLine += 3;
 
         var missingFiles = bot.GetMissingFiles();
         if (missingFiles.Count > 0) {
             WriteColor($"Отсутствуют файлы: {missingFiles.Count}\n", ConsoleColor.Yellow);
             foreach (var file in missingFiles) {
                 WriteColor($"  {file}\n", ConsoleColor.Yellow);
+                currentLine++;
             }
+            currentLine++;
         }
 
         Console.Write("Награды: ");
@@ -157,13 +215,16 @@ class Program {
                 string errorDetails = bot.GetLastRewardsError();
                 if (!string.IsNullOrEmpty(errorDetails)) {
                     WriteColor($"  {errorDetails}\n", ConsoleColor.Yellow);
+                    currentLine++;
                 } else {
                     WriteColor($"  Неизвестная ошибка при создании/обновлении наград\n", ConsoleColor.Yellow);
+                    currentLine++;
                 }
             }
         } else {
             WriteColor("ВЫКЛ\n", ConsoleColor.Gray);
         }
+        currentLine++;
 
         Console.Write("Команды в чате: ");
         if (bot.ChatEnabled) {
@@ -171,31 +232,47 @@ class Program {
             Console.WriteLine($" ({(bot.ChatEnabled ? "ВКЛ" : "ВЫКЛ")})");
             if (!chatOk && !string.IsNullOrEmpty(chatError)) {
                 WriteColor($"  {chatError}\n", ConsoleColor.Yellow);
+                currentLine++;
             }
         } else {
             WriteColor("ВЫКЛ\n", ConsoleColor.Gray);
         }
-
-        Console.WriteLine($"Всего использований голосовых команд: {bot.GetTotalUsage()}");
-        Console.WriteLine();
+        currentLine++;
 
         // Статус VIP наград
         Console.Write("Покупка VIP: ");
         WriteColor(bot.VipRewardEnabled ? "ВКЛ" : "ВЫКЛ", bot.VipRewardEnabled ? ConsoleColor.Green : ConsoleColor.Gray);
         Console.WriteLine();
+        currentLine++;
 
         Console.Write("Воровство VIP: ");
         WriteColor(bot.VipStealEnabled ? "ВКЛ" : "ВЫКЛ", bot.VipStealEnabled ? ConsoleColor.Green : ConsoleColor.Gray);
         Console.WriteLine();
-        Console.WriteLine();
-        Console.WriteLine();
+        currentLine++;
 
+        // ПУСТАЯ СТРОКА ДЛЯ РАЗДЕЛЕНИЯ
+        Console.WriteLine();
+        currentLine++;
+
+        // ВЫВОД СТАТИСТИКИ В ПРАВИЛЬНОМ МЕСТЕ
+        currentLine++;
+
+        // Вызываем статистику с правильной позицией
+        bot.DisplayLiveStatistics(0, currentLine);
+        currentLine += 6; // Примерно 6 строк для статистики
+
+        // ПУСТАЯ СТРОКА ДЛЯ РАЗДЕЛЕНИЯ
+        Console.SetCursorPosition(0, currentLine);
+        Console.WriteLine();
+        currentLine++;
+
+        // ПОДСКАЗКИ ПО КЛАВИШАМ
+        Console.WriteLine();
         WriteColor("s - Статистика по командам\n", ConsoleColor.DarkGray);
         WriteColor("p - Настройки\n", ConsoleColor.DarkGray);
         WriteColor("r - Перезагрузить\n", ConsoleColor.DarkGray);
         WriteColor("w - Выход с отключением наград\n", ConsoleColor.DarkGray);
         WriteColor("q - Выход\n", ConsoleColor.DarkGray);
-        Console.WriteLine();
     }
 
     static void HandlePreferences() {

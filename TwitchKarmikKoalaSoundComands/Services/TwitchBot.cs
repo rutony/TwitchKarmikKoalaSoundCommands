@@ -22,6 +22,8 @@ public class TwitchBot {
     private readonly MusicTrackerService musicTracker;
     private readonly List<string> musicKeywords;
 
+    private StatisticsDisplay statisticsDisplay;
+
     public TwitchBot() {
         settingsManager = new SettingsManager();
         commandManager = new CommandManager(settingsManager.Settings);
@@ -38,10 +40,12 @@ public class TwitchBot {
         connectionManager.OnRewardMappingUpdated += HandleRewardMapping;
 
         vipManager = null;
+        statisticsDisplay = null;
 
         musicTracker = new MusicTrackerService(settingsManager.Settings);
         musicKeywords = new List<string>();
         LoadMusicKeywords();
+
     }
 
     private void InitializeApi() {
@@ -70,6 +74,12 @@ public class TwitchBot {
         if (vipManager == null) {
             vipManager = new VipManager(connectionManager.Api, connectionManager.ChannelId, settingsManager.Settings);
         }
+
+        if (statisticsDisplay == null) {
+            statisticsDisplay = new StatisticsDisplay(this, vipManager, commandManager, settingsManager.Settings);
+        }
+
+        statisticsDisplay.Start();
 
         if (settingsManager.Settings.MusicTrackerEnabled) {
             musicTracker.Start();
@@ -149,6 +159,9 @@ public class TwitchBot {
         }
 
         fileManager.CheckSoundFiles(commandManager.GetAllCommands());
+
+        statisticsDisplay.Start();
+
         return result;
     }
 
@@ -188,7 +201,14 @@ public class TwitchBot {
                 if (settingsManager.Settings.DebugMode) {
                     WriteColor($"🔊 Активирована команда чата: {message} пользователем {username}\n", ConsoleColor.Cyan);
                 }
+
+                // Записываем статистику
+                statisticsDisplay.RecordSoundActivation(username, message, 0); // Для чата стоимость 0
+
                 audioPlayer.PlaySound(command.SoundFile, username, message);
+
+                // Обновляем отображение статистики
+                UpdateStatisticsDisplay();
             }
         }
     }
@@ -240,7 +260,14 @@ public class TwitchBot {
                 if (settingsManager.Settings.DebugMode) {
                     WriteColor($"🎁 Активирована награда: {args.command} пользователем {args.username}\n", ConsoleColor.Magenta);
                 }
+
+                // Записываем статистику с стоимостью
+                statisticsDisplay.RecordSoundActivation(args.username, args.command, soundCommand.Cost);
+
                 audioPlayer.PlaySound(soundCommand.SoundFile, args.username, args.command);
+
+                // Обновляем отображение статистики
+                UpdateStatisticsDisplay();
             }
         } else {
             if (settingsManager.Settings.DebugMode) {
@@ -251,8 +278,14 @@ public class TwitchBot {
 
     private void HandleVipPurchase(string username) {
         if (vipManager.PurchaseVip(username)) {
+            // Записываем статистику
+            statisticsDisplay.RecordVipPurchase(username);
+
             // Отправляем сообщение в чат
             connectionManager.SendMessage($"🎉 Поздравляем, {username}! Вы стали VIP на {settingsManager.Settings.VipDurationDays} дней!");
+
+            // Обновляем отображение статистики
+            UpdateStatisticsDisplay();
         } else {
             connectionManager.SendMessage($"❌ {username}, невозможно выдать VIP. Возможно, нет свободных слотов или вы уже VIP.");
         }
@@ -262,14 +295,26 @@ public class TwitchBot {
         var result = vipManager.StealVip(thiefName);
 
         if (result.success) {
+            // Записываем статистику успешной кражи
+            statisticsDisplay.RecordStealAttempt(thiefName, true, result.stolenFrom);
+
             string message = vipManager.GetRandomSuccessfulStealMessage(thiefName, result.stolenFrom);
             connectionManager.SendMessage(message);
+
+            // Обновляем отображение статистики
+            UpdateStatisticsDisplay();
         } else {
+            // Записываем статистику неудачной кражи
+            statisticsDisplay.RecordStealAttempt(thiefName, false);
+
             string message = vipManager.GetRandomFailedStealMessage(thiefName);
             connectionManager.SendMessage(message);
 
             // Бан на указанное время
             await connectionManager.BanUser(thiefName, settingsManager.Settings.VipStealBanTime);
+
+            // Обновляем отображение статистики
+            UpdateStatisticsDisplay();
         }
     }
 
@@ -289,6 +334,14 @@ public class TwitchBot {
             if (settingsManager.Settings.DebugMode) {
                 WriteColor($"❌ Не найдена команда для награды: {args.rewardTitle}\n", ConsoleColor.Red);
             }
+        }
+    }
+
+    private void UpdateStatisticsDisplay() {
+        // Этот метод будет вызывать обновление интерфейса
+        // В реальной реализации нужно обновить консоль
+        if (Program.IsInterfaceActive) {
+            Program.RequestInterfaceUpdate();
         }
     }
 
@@ -403,6 +456,9 @@ public class TwitchBot {
     }
 
     public async Task Disconnect(bool disableRewards = true) {
+
+        statisticsDisplay.Stop();
+
         if (disableRewards) {
             if (settingsManager.Settings.EnableVipReward || settingsManager.Settings.EnableVipStealReward) {
                 await vipManager.DisableVipRewards();
@@ -465,6 +521,14 @@ public class TwitchBot {
         } catch (Exception ex) {
             WriteColor($"❌ Ошибка проверки токена: {ex.Message}\n", ConsoleColor.Red);
         }
+    }
+
+    public void DisplayLiveStatistics(int _left, int _top) {
+        statisticsDisplay?.DisplayStatistics(_left, _top);
+    }
+
+    public void StopStatistics() {
+        statisticsDisplay?.Stop();
     }
 
     private void WriteDebug(string text, ConsoleColor color) {
