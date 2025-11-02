@@ -135,7 +135,7 @@ public class CommandManager {
         TotalUsage = commandUsage.Values.Sum();
     }
 
-    public SoundCommand GetCommand(string command) {
+    public SoundCommand? GetCommand(string command) {
         return soundCommands.ContainsKey(command.ToLower()) ? soundCommands[command.ToLower()] : null;
     }
 

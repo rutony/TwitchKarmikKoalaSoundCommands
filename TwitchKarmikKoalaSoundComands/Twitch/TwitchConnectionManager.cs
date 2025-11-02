@@ -10,16 +10,16 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 
 public class TwitchConnectionManager {
-    private TwitchClient client;
-    private TwitchAPI api;
-    private TwitchPubSub pubSub;
+    private TwitchClient? client;
+    private TwitchAPI api = new TwitchAPI();
+    private TwitchPubSub? pubSub;
     private BotSettings settings;
     private string? channelId;
     private string? botId;
 
-    public event EventHandler<(string username, string message)> OnChatCommand;
-    public event EventHandler<(string command, string username)> OnRewardRedeemed;
-    public event EventHandler<(string rewardId, string rewardTitle)> OnRewardMappingUpdated;
+    public event EventHandler<(string username, string message)> OnChatCommand = delegate { };
+    public event EventHandler<(string command, string username)> OnRewardRedeemed = delegate { };
+    public event EventHandler<(string rewardId, string rewardTitle)> OnRewardMappingUpdated = delegate { };
 
     private Dictionary<string, string> rewardIdToCommandMap;
     private List<string> createdRewardIds = new List<string>();
@@ -43,6 +43,8 @@ public class TwitchConnectionManager {
             }
             api.Settings.AccessToken = apiToken;
         }
+
+        await Task.CompletedTask;
     }
 
     public void SendMessage(string message) {
@@ -266,6 +268,8 @@ public class TwitchConnectionManager {
         client?.Disconnect();
         pubSub?.Disconnect();
         WriteDebug("Соединение закрыто\n", ConsoleColor.Yellow);
+
+        await Task.CompletedTask;
     }
 
     // Метод для добавления сопоставления наград

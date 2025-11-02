@@ -17,6 +17,7 @@
     public int VipDurationDays { get; set; } = 30;
 
     // Настройки кражи VIP
+    public int MaxVipCount { get; set; } = 50;
     public bool EnableVipStealReward { get; set; } = false;
     public int VipStealCost { get; set; } = 50000;
     public int VipStealChance { get; set; } = 5; // в процентах

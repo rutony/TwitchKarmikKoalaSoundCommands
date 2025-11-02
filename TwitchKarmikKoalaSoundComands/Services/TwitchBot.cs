@@ -165,6 +165,20 @@ public class TwitchBot {
         return result;
     }
 
+    public async Task ForceResyncVip() {
+        if (vipManager != null) {
+            WriteColor($"🔄 Принудительная синхронизация VIP списка...\n", ConsoleColor.Cyan);
+            await vipManager.SyncWithRealVipList();
+            WriteColor("✅ Синхронизация завершена\n", ConsoleColor.Green);
+            WriteColor("Нажмите любую клавишу чтобы продолжить...\n", ConsoleColor.Yellow);
+            Console.ReadKey();
+        } else {
+            WriteColor("❌ VipManager не инициализирован\n", ConsoleColor.Red);
+            WriteColor("Нажмите любую клавишу чтобы продолжить...\n", ConsoleColor.Yellow);
+            Console.ReadKey();
+        }
+    }
+
     private void LoadMusicKeywords() {
         musicKeywords.Clear();
         var keywords = settingsManager.Settings.MusicCommandKeywords
@@ -182,7 +196,7 @@ public class TwitchBot {
         }
     }
 
-    private async void HandleChatCommand(object sender, (string username, string message) args) {
+    private async void HandleChatCommand(object? sender, (string username, string message) args) {
         if (!settingsManager.Settings.ChatEnabled)
             return;
 
@@ -238,9 +252,11 @@ public class TwitchBot {
                 WriteColor($"❌ Ошибка обработки музыкальной команды: {ex.Message}\n", ConsoleColor.Red);
             }
         }
+
+        await Task.CompletedTask;
     }
 
-    private async void HandleRewardCommand(object sender, (string command, string username) args) {
+    private async void HandleRewardCommand(object? sender, (string command, string username) args) {
         if (!settingsManager.Settings.RewardsEnabled)
             return;
 
@@ -274,6 +290,8 @@ public class TwitchBot {
                 WriteColor($"⏳ Cooldown для команды {args.command} пользователя {args.username}\n", ConsoleColor.Yellow);
             }
         }
+
+        await Task.CompletedTask;
     }
 
     private async void HandleVipPurchase(string username) {
@@ -428,7 +446,6 @@ public class TwitchBot {
                    settingsManager.Settings.RewardsEnabled ? ConsoleColor.Green : ConsoleColor.Red);
         Console.WriteLine();
 
-        // Добавляем настройки VIP
         Console.Write("3 - Покупка VIP: ");
         WriteColor(settingsManager.Settings.EnableVipReward ? "ВКЛ" : "ВЫКЛ",
                    settingsManager.Settings.EnableVipReward ? ConsoleColor.Green : ConsoleColor.Red);
@@ -438,6 +455,8 @@ public class TwitchBot {
         WriteColor(settingsManager.Settings.EnableVipStealReward ? "ВКЛ" : "ВЫКЛ",
                    settingsManager.Settings.EnableVipStealReward ? ConsoleColor.Green : ConsoleColor.Red);
         Console.WriteLine();
+
+        WriteColor("5 - Удалить всех VIP (требует подтверждения)\n", ConsoleColor.Red);
         Console.WriteLine();
 
         Console.Write("t - Режим отладки: ");
@@ -453,6 +472,13 @@ public class TwitchBot {
         Console.WriteLine();
         WriteColor("b - Назад\n", ConsoleColor.Gray);
         Console.WriteLine();
+    }
+
+    public async Task<bool> RemoveAllVips(bool confirm) {
+        if (vipManager != null) {
+            return await vipManager.RemoveAllVips(confirm);
+        }
+        return false;
     }
 
     public async Task Disconnect(bool disableRewards = true) {
@@ -475,7 +501,16 @@ public class TwitchBot {
     }
 
     public string GetAuthUrl() {
-        var scopes = "channel:manage:redemptions chat:edit chat:read moderator:manage:banned_users channel:read:redemptions channel:manage:vips";
+        // Обновленные scopes с правами для VIP
+        var scopes = "channel:manage:redemptions " +
+                     "chat:edit " +
+                     "chat:read " +
+                     "moderator:manage:banned_users " +
+                     "channel:read:redemptions " +
+                     "channel:manage:vips " +
+                     "channel:read:vips " +  // Чтение списка VIP
+                     "moderator:read:followers";  // Дополнительные права
+
         var encodedScopes = Uri.EscapeDataString(scopes);
         return $"https://id.twitch.tv/oauth2/authorize?client_id={settingsManager.Settings.ClientId}&redirect_uri=http://localhost&response_type=token&scope={encodedScopes}";
     }

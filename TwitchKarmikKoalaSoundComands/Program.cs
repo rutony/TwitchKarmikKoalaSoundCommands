@@ -250,10 +250,6 @@ class Program {
         Console.WriteLine();
         currentLine++;
 
-        // ПУСТАЯ СТРОКА ДЛЯ РАЗДЕЛЕНИЯ
-        Console.WriteLine();
-        currentLine++;
-
         // ВЫВОД СТАТИСТИКИ В ПРАВИЛЬНОМ МЕСТЕ
         currentLine++;
 
@@ -267,6 +263,7 @@ class Program {
         currentLine++;
 
         // ПОДСКАЗКИ ПО КЛАВИШАМ
+        Console.WriteLine();
         Console.WriteLine();
         WriteColor("s - Статистика по командам\n", ConsoleColor.DarkGray);
         WriteColor("p - Настройки\n", ConsoleColor.DarkGray);
@@ -301,6 +298,11 @@ class Program {
                     bot.ShowPreferences();
                     break;
 
+                case '5':
+                    HandleRemoveAllVips();
+                    bot.ShowPreferences();
+                    break;
+
                 case 't':
                 case 'T':
                 case 'е':
@@ -332,6 +334,25 @@ class Program {
                     return;
             }
         }
+    }
+
+    static void HandleRemoveAllVips() {
+        Console.Clear();
+        WriteColor("=== УДАЛЕНИЕ ВСЕХ VIP ===\n", ConsoleColor.Red);
+        WriteColor("⚠️  ВНИМАНИЕ: Это действие удалит всех VIP из локального списка!\n", ConsoleColor.Yellow);
+        WriteColor("⚠️  VIP на канале Twitch останутся без изменений!\n", ConsoleColor.Yellow);
+        WriteColor("Для подтверждения введите 'DELETE': ", ConsoleColor.White);
+
+        var input = Console.ReadLine();
+        if (input?.ToUpper() == "DELETE") {
+            var task = Task.Run(async () => await bot.RemoveAllVips(true));
+            task.Wait();
+        } else {
+            WriteColor("❌ Отменено\n", ConsoleColor.Red);
+        }
+
+        WriteColor("Нажмите любую клавишу чтобы продолжить...\n", ConsoleColor.Yellow);
+        Console.ReadKey();
     }
 
     static void OpenAuthInBrowser() {

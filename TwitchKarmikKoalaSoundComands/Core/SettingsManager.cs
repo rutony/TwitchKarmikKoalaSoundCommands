@@ -74,6 +74,10 @@ public class SettingsManager {
                             if (bool.TryParse(value, out bool enableVipReward))
                                 Settings.EnableVipReward = enableVipReward;
                             break;
+                        case "max_vip_count":
+                            if (int.TryParse(value, out int maxVipCount))
+                                Settings.MaxVipCount = maxVipCount;
+                            break;
                         case "vip_reward_cost":
                             if (int.TryParse(value, out int vipRewardCost))
                                 Settings.VipRewardCost = vipRewardCost;
@@ -202,6 +206,8 @@ public class SettingsManager {
             "debug_mode=false",
             "volume=50",
             "",
+            "# Настройки лимита VIP:",
+            "max_vip_count=50",
             "# Настройки Покупки VIP:",
             "enable_vip_reward=false",
             "vip_reward_cost=150000",

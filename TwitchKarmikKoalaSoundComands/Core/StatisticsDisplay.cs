@@ -79,12 +79,23 @@ public class StatisticsDisplay {
             // Обновляем статистику VIP
             if (_vipManager != null) {
                 try {
-                    VipCount = await _vipManager.GetActiveVipCountAsync(); // Используем асинхронный метод
+                    // Пробуем получить количество VIP разными способами
+                    VipCount = await _vipManager.GetActiveVipCountAsync();
+
+                    // Если получили 0, но должны быть VIP, используем fallback
+                    if (VipCount == 0) {
+                        var vipUsers = _vipManager.GetVipUsers();
+                        VipCount = vipUsers.Count;
+
+                        if (VipCount == 0 && _settings.DebugMode) {
+                            WriteColor($"⚠️ Не удалось получить количество VIP\n", ConsoleColor.Yellow);
+                        }
+                    }
                 } catch (Exception ex) {
                     if (_settings.DebugMode) {
                         WriteColor($"⚠️ Ошибка получения VIP статистики: {ex.Message}\n", ConsoleColor.Yellow);
                     }
-                    // Fallback на синхронный метод в случае ошибки
+                    // Fallback: используем локальный подсчет
                     VipCount = _vipManager.GetActiveVipCount();
                 }
             }
@@ -183,7 +194,13 @@ public class StatisticsDisplay {
 
             // VIP статистика - ИСПРАВЛЕНО: используем актуальное количество VIP
             Console.Write("⭐ VIP на канале: ");
-            WriteColor($"{VipCount}/100", ConsoleColor.Magenta); // Изменено с 5 на 100
+            WriteColor($"{VipCount}/{_settings.MaxVipCount}", ConsoleColor.Magenta);
+            Console.WriteLine();
+            // Статус награды покупки VIP
+            Console.Write("   Награда 'Купить VIP': ");
+            var purchaseAvailable = VipCount < _settings.MaxVipCount;
+            WriteColor(purchaseAvailable ? "ДОСТУПНА" : "НЕДОСТУПНА",
+                      purchaseAvailable ? ConsoleColor.Green : ConsoleColor.Red);
             Console.WriteLine();
             Console.Write("   Последняя покупка: ");
             WriteColor(LastVipPurchase, ConsoleColor.Green);
@@ -214,6 +231,7 @@ public class StatisticsDisplay {
                 Console.Write(" - ");
                 WriteColor(LastStealTime.ToString("dd.MM HH:mm"), ConsoleColor.Gray);
             }
+            Console.WriteLine();
             Console.WriteLine();
 
             // Восстанавливаем позицию курсора
