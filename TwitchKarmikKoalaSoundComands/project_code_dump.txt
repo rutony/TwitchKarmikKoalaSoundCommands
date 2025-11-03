@@ -1,0 +1,3511 @@
+=============== ПРОЕКТ: КОД ИЗ ВСЕХ .CS ФАЙЛОВ =============== 
+ 
+ 
+==================== Файл: E:\_dev\_tests\TwitchKarmikKoalaSoundComands\TwitchKarmikKoalaSoundComands\Program.cs ==================== 
+ 
+﻿using System;
+using System.Threading.Tasks;
+
+class Program {
+    private static TwitchBot bot;
+    private static bool running = true;
+    private static bool alreadyDisconnected = false;
+
+    private static Timer interfaceUpdateTimer;
+    public static bool IsInterfaceActive { get; private set; } = true;
+    private static bool interfaceUpdateRequested = false;
+
+    static async Task Main(string[] args) {
+        Console.Title = "Twitch Sound Bot (с) RUTONY 2025";
+
+        Console.OutputEncoding = System.Text.Encoding.UTF8;
+
+        try {
+            Console.InputEncoding = System.Text.Encoding.UTF8;
+        } catch {
+        }
+
+        try {
+            bot = new TwitchBot();
+
+            WriteColor("Подключение...\n", ConsoleColor.Yellow);
+
+            var (authOk, authError, rewardsOk, rewardsError, chatOk, chatError) = await bot.Connect();
+
+            if (bot.IsDebugMode) {
+                await bot.CheckTokenScopes();
+                Console.WriteLine("Нажмите любую клавишу чтобы продолжить...");
+                Console.ReadKey();
+            }
+
+            // Запускаем таймер для обновления интерфейса
+            StartInterfaceUpdateTimer();
+
+            Console.Clear();
+            DisplayStatus(authOk, authError, rewardsOk, rewardsError, chatOk, chatError);
+
+            while (running) {
+                var key = Console.ReadKey(true);
+
+                switch (key.KeyChar) {
+                    case 's':
+                    case 'S':
+                    case 'ы':
+                    case 'Ы':
+                        IsInterfaceActive = false;
+                        bot.ShowStatistics();
+                        WaitForBack();
+                        IsInterfaceActive = true;
+                        Console.Clear();
+                        DisplayStatus(authOk, authError, rewardsOk, rewardsError, chatOk, chatError);
+                        break;
+
+                    case 'p':
+                    case 'P':
+                    case 'з':
+                    case 'З':
+                        IsInterfaceActive = false;
+                        HandlePreferences();
+                        IsInterfaceActive = true;
+                        Console.Clear();
+                        DisplayStatus(authOk, authError, rewardsOk, rewardsError, chatOk, chatError);
+                        break;
+
+                    case 'r':
+                    case 'R':
+                    case 'к':
+                    case 'К':
+                        IsInterfaceActive = false;
+                        Console.Clear();
+                        WriteColor("Перезагрузка...\n", ConsoleColor.Yellow);
+
+                        try {
+                            // Останавливаем таймер
+                            interfaceUpdateTimer?.Dispose();
+
+                            // Останавливаем статистику перед перезагрузкой
+                            bot.StopStatistics();
+
+                            // Отключаем без деактивации наград
+                            await bot.Disconnect(false);
+
+                            // Небольшая пауза для очистки
+                            await Task.Delay(1000);
+
+                            // Создаем полностью новый экземпляр
+                            bot = new TwitchBot();
+
+                            // Переподключаем
+                            (authOk, authError, rewardsOk, rewardsError, chatOk, chatError) = await bot.Connect();
+
+                            // Перезапускаем таймер
+                            StartInterfaceUpdateTimer();
+
+                            IsInterfaceActive = true;
+                            Console.Clear();
+                            DisplayStatus(authOk, authError, rewardsOk, rewardsError, chatOk, chatError);
+                        } catch (Exception ex) {
+                            WriteColor($"❌ Ошибка перезагрузки: {ex.Message}\n", ConsoleColor.Red);
+                            WriteColor("Нажмите любую клавишу для продолжения...\n", ConsoleColor.Yellow);
+                            Console.ReadKey();
+                        }
+                        break;
+
+                    case 'q':
+                    case 'Q':
+                    case 'й':
+                    case 'Й':
+                        if (!alreadyDisconnected) {
+                            IsInterfaceActive = false;
+                            alreadyDisconnected = true;
+                            running = false;
+                            interfaceUpdateTimer?.Dispose();
+                            WriteColor("Выход без отключения наград...\n", ConsoleColor.Yellow);
+                            await bot.Disconnect(false);
+                        }
+                        break;
+
+                    case 'w':
+                    case 'W':
+                    case 'ц':
+                    case 'Ц':
+                        if (!alreadyDisconnected) {
+                            IsInterfaceActive = false;
+                            alreadyDisconnected = true;
+                            running = false;
+                            interfaceUpdateTimer?.Dispose();
+                            WriteColor("Выход с отключением наград...\n", ConsoleColor.Yellow);
+                            await bot.Disconnect(true);
+                        }
+                        break;
+                    default:
+                        // При нажатии любой другой клавиши обновляем отображение
+                        Console.Clear();
+                        DisplayStatus(authOk, authError, rewardsOk, rewardsError, chatOk, chatError);
+                        break;
+                }
+            }
+
+            interfaceUpdateTimer?.Dispose();
+            WriteColor("Программа завершена.\n", ConsoleColor.Yellow);
+        } catch (Exception ex) {
+            WriteColor($"❌ Ошибка: {ex.Message}\n", ConsoleColor.Red);
+            WriteColor("Нажмите любую клавишу...\n", ConsoleColor.Gray);
+            Console.ReadKey();
+        }
+    }
+
+    private static void StartInterfaceUpdateTimer() {
+        interfaceUpdateTimer = new Timer(_ => {
+            if (interfaceUpdateRequested && IsInterfaceActive) {
+                interfaceUpdateRequested = false;
+                // В консольных приложениях сложно обновить интерфейс без перерисовки
+                // Поэтому просто перерисовываем весь интерфейс при событиях
+                if (bot != null) {
+                    var settings = bot.GetCurrentSettings();
+                    var (authOk, authError, rewardsOk, rewardsError, chatOk, chatError) =
+                        (true, "", true, "", true, ""); // Упрощенные значения для перерисовки
+
+                    Console.Clear();
+                    DisplayStatus(authOk, authError, rewardsOk, rewardsError, chatOk, chatError);
+                }
+            }
+        }, null, 0, 1000); // Проверяем каждую секунду
+    }
+
+    public static void RequestInterfaceUpdate() {
+        interfaceUpdateRequested = true;
+    }
+
+    static void DisplayStatus(bool authOk, string authError, bool rewardsOk, string rewardsError, bool chatOk, string chatError) {
+        Console.Clear(); // Полностью очищаем консоль
+
+        int currentLine = 0;
+
+        // Выводим основную информацию
+        Console.WriteLine($"Канал: {bot.GetChannelName()}");
+        currentLine++;
+
+        Console.Write("Авторизация: ");
+        if (authOk) {
+            WriteColor("✅ OK\n", ConsoleColor.Green);
+        } else {
+            WriteColor("❌ Ошибка\n", ConsoleColor.Red);
+            if (!string.IsNullOrEmpty(authError)) {
+                WriteColor($"  {authError}\n", ConsoleColor.Yellow);
+            }
+        }
+        currentLine++;
+
+        Console.WriteLine($"Количество звуковых команд: {bot.GetTotalCommands()}");
+        Console.WriteLine($"  - Для чата: {bot.GetChatEnabledCount()}");
+        Console.WriteLine($"  - Для наград: {bot.GetRewardEnabledCount()}");
+        currentLine += 3;
+
+        var missingFiles = bot.GetMissingFiles();
+        if (missingFiles.Count > 0) {
+            WriteColor($"Отсутствуют файлы: {missingFiles.Count}\n", ConsoleColor.Yellow);
+            foreach (var file in missingFiles) {
+                WriteColor($"  {file}\n", ConsoleColor.Yellow);
+                currentLine++;
+            }
+            currentLine++;
+        }
+
+        Console.Write("Награды: ");
+        if (bot.RewardsEnabled) {
+            WriteColor(rewardsOk ? "✅ OK" : "❌ Ошибка", rewardsOk ? ConsoleColor.Green : ConsoleColor.Red);
+            Console.WriteLine($" ({(bot.RewardsEnabled ? "ВКЛ" : "ВЫКЛ")})");
+            if (!rewardsOk) {
+                string errorDetails = bot.GetLastRewardsError();
+                if (!string.IsNullOrEmpty(errorDetails)) {
+                    WriteColor($"  {errorDetails}\n", ConsoleColor.Yellow);
+                    currentLine++;
+                } else {
+                    WriteColor($"  Неизвестная ошибка при создании/обновлении наград\n", ConsoleColor.Yellow);
+                    currentLine++;
+                }
+            }
+        } else {
+            WriteColor("ВЫКЛ\n", ConsoleColor.Gray);
+        }
+        currentLine++;
+
+        Console.Write("Команды в чате: ");
+        if (bot.ChatEnabled) {
+            WriteColor(chatOk ? "✅ OK" : "❌ Ошибка", chatOk ? ConsoleColor.Green : ConsoleColor.Red);
+            Console.WriteLine($" ({(bot.ChatEnabled ? "ВКЛ" : "ВЫКЛ")})");
+            if (!chatOk && !string.IsNullOrEmpty(chatError)) {
+                WriteColor($"  {chatError}\n", ConsoleColor.Yellow);
+                currentLine++;
+            }
+        } else {
+            WriteColor("ВЫКЛ\n", ConsoleColor.Gray);
+        }
+        currentLine++;
+
+        // Статус VIP наград
+        Console.Write("Покупка VIP: ");
+        WriteColor(bot.VipRewardEnabled ? "ВКЛ" : "ВЫКЛ", bot.VipRewardEnabled ? ConsoleColor.Green : ConsoleColor.Gray);
+        Console.WriteLine();
+        currentLine++;
+
+        Console.Write("Воровство VIP: ");
+        WriteColor(bot.VipStealEnabled ? "ВКЛ" : "ВЫКЛ", bot.VipStealEnabled ? ConsoleColor.Green : ConsoleColor.Gray);
+        Console.WriteLine();
+        currentLine++;
+
+        // ВЫВОД СТАТИСТИКИ В ПРАВИЛЬНОМ МЕСТЕ
+        currentLine++;
+
+        // Вызываем статистику с правильной позицией
+        bot.DisplayLiveStatistics(0, currentLine);
+        currentLine += 6; // Примерно 6 строк для статистики
+
+        // ПУСТАЯ СТРОКА ДЛЯ РАЗДЕЛЕНИЯ
+        Console.SetCursorPosition(0, currentLine);
+        Console.WriteLine();
+        currentLine++;
+
+        // ПОДСКАЗКИ ПО КЛАВИШАМ
+        Console.WriteLine();
+        Console.WriteLine();
+        WriteColor("s - Статистика по командам\n", ConsoleColor.DarkGray);
+        WriteColor("p - Настройки\n", ConsoleColor.DarkGray);
+        WriteColor("r - Перезагрузить\n", ConsoleColor.DarkGray);
+        WriteColor("w - Выход с отключением наград\n", ConsoleColor.DarkGray);
+        WriteColor("q - Выход\n", ConsoleColor.DarkGray);
+    }
+
+    static void HandlePreferences() {
+        bot.ShowPreferences();
+
+        while (true) {
+            var key = Console.ReadKey(true);
+            switch (key.KeyChar) {
+                case '1':
+                    bot.ToggleChat();
+                    bot.ShowPreferences();
+                    break;
+
+                case '2':
+                    bot.ToggleRewards();
+                    bot.ShowPreferences();
+                    break;
+
+                case '3':
+                    bot.ToggleVipReward();
+                    bot.ShowPreferences();
+                    break;
+
+                case '4':
+                    bot.ToggleVipStealReward();
+                    bot.ShowPreferences();
+                    break;
+
+                case '5':
+                    HandleRemoveAllVips();
+                    bot.ShowPreferences();
+                    break;
+
+                case 't':
+                case 'T':
+                case 'е':
+                case 'Е':
+                    bot.ToggleDebugMode();
+                    bot.ShowPreferences();
+                    break;
+
+                case 'v':
+                case 'V':
+                case 'м':
+                case 'М':
+                    bot.ChangeVolume();
+                    bot.ShowPreferences();
+                    break;
+
+                case 'a':
+                case 'A':
+                case 'ф':
+                case 'Ф':
+                    OpenAuthInBrowser();
+                    bot.ShowPreferences();
+                    break;
+
+                case 'b':
+                case 'B':
+                case 'и':
+                case 'И':
+                    return;
+            }
+        }
+    }
+
+    static void HandleRemoveAllVips() {
+        Console.Clear();
+        WriteColor("=== УДАЛЕНИЕ ВСЕХ VIP ===\n", ConsoleColor.Red);
+        WriteColor("⚠️  ВНИМАНИЕ: Это действие удалит всех VIP из локального списка!\n", ConsoleColor.Yellow);
+        WriteColor("⚠️  VIP на канале Twitch останутся без изменений!\n", ConsoleColor.Yellow);
+        WriteColor("Для подтверждения введите 'DELETE': ", ConsoleColor.White);
+
+        var input = Console.ReadLine();
+        if (input?.ToUpper() == "DELETE") {
+            var task = Task.Run(async () => await bot.RemoveAllVips(true));
+            task.Wait();
+        } else {
+            WriteColor("❌ Отменено\n", ConsoleColor.Red);
+        }
+
+        WriteColor("Нажмите любую клавишу чтобы продолжить...\n", ConsoleColor.Yellow);
+        Console.ReadKey();
+    }
+
+    static void OpenAuthInBrowser() {
+        try {
+            var authUrl = bot.GetAuthUrl();
+            WriteColor($"Открываю ссылку авторизации в браузере...\n", ConsoleColor.Yellow);
+            WriteColor($"Ссылка: {authUrl}\n", ConsoleColor.Cyan);
+
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo {
+                FileName = authUrl,
+                UseShellExecute = true
+            });
+
+            WriteColor("\nИнструкция:\n", ConsoleColor.White);
+            WriteColor("1. Авторизуйтесь в Twitch\n", ConsoleColor.Gray);
+            WriteColor("2. Скопируйте токен из адресной строки (часть после 'access_token=')\n", ConsoleColor.Gray);
+            WriteColor("3. Обновите файл bot_settings.txt с новым токеном\n", ConsoleColor.Gray);
+            WriteColor("4. Перезапустите бота (клавиша 'r')\n", ConsoleColor.Gray);
+            WriteColor("\nНажмите любую клавишу чтобы продолжить...\n", ConsoleColor.Yellow);
+            Console.ReadKey();
+        } catch (Exception ex) {
+            WriteColor($"Ошибка открытия браузера: {ex.Message}\n", ConsoleColor.Red);
+            WriteColor($"Скопируйте ссылку вручную: {bot.GetAuthUrl()}\n", ConsoleColor.Cyan);
+            WriteColor("Нажмите любую клавишу чтобы продолжить...\n", ConsoleColor.Yellow);
+            Console.ReadKey();
+        }
+    }
+
+    static void WaitForBack() {
+        while (true) {
+            var key = Console.ReadKey(true);
+            if (key.KeyChar == 'b' || key.KeyChar == 'B' || key.KeyChar == 'и' || key.KeyChar == 'И')
+                break;
+        }
+    }
+
+    static void WriteColor(string text, ConsoleColor color) {
+        var originalColor = Console.ForegroundColor;
+        Console.ForegroundColor = color;
+        Console.Write(text);
+        Console.ForegroundColor = originalColor;
+    }
+} 
+-------------------------------------------------------- 
+ 
+ 
+==================== Файл: E:\_dev\_tests\TwitchKarmikKoalaSoundComands\TwitchKarmikKoalaSoundComands\Audio\AudioPlayer.cs ==================== 
+ 
+﻿using NAudio.Wave;
+using System;
+using System.Threading;
+
+public class AudioPlayer {
+    private readonly object soundLock = new object();
+    private BotSettings settings;
+
+    public AudioPlayer(BotSettings settings) {
+        this.settings = settings;
+    }
+
+    public void PlaySound(string soundFile, string username, string command) {
+        lock (soundLock) {
+            try {
+                using (var audioFile = new AudioFileReader(soundFile))
+                using (var outputDevice = new WaveOutEvent()) {
+                    if (settings.Volume != 100) {
+                        var volumeProvider = new VolumeSampleProvider(audioFile.ToSampleProvider());
+                        volumeProvider.Volume = settings.Volume / 100f;
+                        outputDevice.Init(volumeProvider);
+                    } else {
+                        outputDevice.Init(audioFile);
+                    }
+
+                    outputDevice.Play();
+
+                    while (outputDevice.PlaybackState == PlaybackState.Playing) {
+                        Thread.Sleep(100);
+                    }
+                }
+            } catch (Exception ex) {
+                WriteColor($"Ошибка воспроизведения: {ex.Message}\n", ConsoleColor.Red);
+            }
+        }
+    }
+
+    private void WriteColor(string text, ConsoleColor color) {
+        var originalColor = Console.ForegroundColor;
+        Console.ForegroundColor = color;
+        Console.Write(text);
+        Console.ForegroundColor = originalColor;
+    }
+} 
+-------------------------------------------------------- 
+ 
+ 
+==================== Файл: E:\_dev\_tests\TwitchKarmikKoalaSoundComands\TwitchKarmikKoalaSoundComands\Audio\VolumeSampleProvider.cs ==================== 
+ 
+﻿using NAudio.Wave;
+using NAudio.Wave.SampleProviders;
+
+public class VolumeSampleProvider : ISampleProvider {
+    private readonly ISampleProvider source;
+    public float Volume { get; set; }
+
+    public VolumeSampleProvider(ISampleProvider source) {
+        this.source = source;
+        Volume = 1.0f;
+    }
+
+    public WaveFormat WaveFormat => source.WaveFormat;
+
+    public int Read(float[] buffer, int offset, int count) {
+        int samplesRead = source.Read(buffer, offset, count);
+        for (int i = 0; i < samplesRead; i++) {
+            buffer[offset + i] *= Volume;
+        }
+        return samplesRead;
+    }
+} 
+-------------------------------------------------------- 
+ 
+ 
+==================== Файл: E:\_dev\_tests\TwitchKarmikKoalaSoundComands\TwitchKarmikKoalaSoundComands\Core\CommandManager.cs ==================== 
+ 
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+
+public class CommandManager {
+    private Dictionary<string, SoundCommand> soundCommands;
+    private Dictionary<string, int> commandUsage = new Dictionary<string, int>();
+    private Dictionary<string, DateTime> lastCommandUsage = new Dictionary<string, DateTime>();
+    private Dictionary<string, DateTime> lastRewardUsage = new Dictionary<string, DateTime>();
+    private BotSettings settings;
+    private string configFile = "config/sound_commands.txt";
+
+    public int ChatEnabledCount { get; private set; }
+    public int RewardEnabledCount { get; private set; }
+    public int TotalUsage { get; private set; }
+
+    public CommandManager(BotSettings settings) {
+        this.settings = settings;
+        soundCommands = new Dictionary<string, SoundCommand>();
+        LoadSoundCommands();
+        UpdateStatistics();
+    }
+
+    public void LoadSoundCommands() {
+        if (!File.Exists(configFile)) {
+            CreateDefaultConfig();
+            return;
+        }
+
+        try {
+            var lines = File.ReadAllLines(configFile);
+            soundCommands.Clear();
+
+            foreach (var line in lines) {
+                if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#"))
+                    continue;
+
+                var parts = line.Split('|');
+                if (parts.Length >= 7) {
+                    bool chatEnabled = bool.Parse(parts[0].Trim());
+                    bool rewardEnabled = bool.Parse(parts[1].Trim());
+                    string commandName = parts[2].Trim();
+                    string rewardTitle = parts[3].Trim();
+                    string soundFile = parts[4].Trim();
+                    int cost = int.Parse(parts[5].Trim());
+                    int cooldown = int.Parse(parts[6].Trim());
+
+                    if (!commandName.StartsWith("!")) {
+                        commandName = "!" + commandName;
+                    }
+
+                    var fullSoundPath = Path.Combine(settings.SoundsDirectory, soundFile);
+
+                    soundCommands[commandName.ToLower()] = new SoundCommand(
+                        fullSoundPath,
+                        cost,
+                        cooldown,
+                        rewardTitle,
+                        chatEnabled,
+                        rewardEnabled
+                    );
+                } else {
+                    WriteColor($"Пропущена строка с неправильным форматом: {line}\n", ConsoleColor.Yellow);
+                }
+            }
+        } catch (Exception ex) {
+            throw new Exception($"Ошибка загрузки конфигурации: {ex.Message}");
+        }
+    }
+
+    public bool ProcessChatCommand(string command, string username) {
+        if (!soundCommands.ContainsKey(command.ToLower()))
+            return false;
+
+        var soundCommand = soundCommands[command.ToLower()];
+
+        if (!soundCommand.ChatEnabled)
+            return false;
+
+        string userCommandKey = $"{username}_{command.ToLower()}";
+
+        if (lastCommandUsage.ContainsKey(userCommandKey)) {
+            var lastUsage = lastCommandUsage[userCommandKey];
+            var timeSinceLastUse = DateTime.Now - lastUsage;
+
+            if (timeSinceLastUse.TotalSeconds < soundCommand.Cooldown) {
+                return false;
+            }
+        }
+
+        if (!commandUsage.ContainsKey(command.ToLower()))
+            commandUsage[command.ToLower()] = 0;
+        commandUsage[command.ToLower()]++;
+
+        lastCommandUsage[userCommandKey] = DateTime.Now;
+        UpdateStatistics();
+
+        return true;
+    }
+
+    public bool ProcessRewardCommand(string command, string username) {
+        if (!soundCommands.ContainsKey(command))
+            return false;
+
+        var soundCommand = soundCommands[command];
+
+        if (!soundCommand.RewardEnabled)
+            return false;
+
+        string userRewardKey = $"{username}_{command}";
+
+        if (lastRewardUsage.ContainsKey(userRewardKey)) {
+            var lastUsage = lastRewardUsage[userRewardKey];
+            var timeSinceLastUse = DateTime.Now - lastUsage;
+
+            if (timeSinceLastUse.TotalSeconds < soundCommand.Cooldown) {
+                return false;
+            }
+        }
+
+        if (!commandUsage.ContainsKey(command))
+            commandUsage[command] = 0;
+        commandUsage[command]++;
+
+        lastRewardUsage[userRewardKey] = DateTime.Now;
+        UpdateStatistics();
+
+        return true;
+    }
+
+    public void UpdateStatistics() {
+        ChatEnabledCount = soundCommands.Count(c => c.Value.ChatEnabled);
+        RewardEnabledCount = soundCommands.Count(c => c.Value.RewardEnabled);
+        TotalUsage = commandUsage.Values.Sum();
+    }
+
+    public SoundCommand? GetCommand(string command) {
+        return soundCommands.ContainsKey(command.ToLower()) ? soundCommands[command.ToLower()] : null;
+    }
+
+    public Dictionary<string, SoundCommand> GetAllCommands() {
+        return soundCommands;
+    }
+
+    public Dictionary<string, int> GetCommandUsage() {
+        return commandUsage;
+    }
+
+    private void CreateDefaultConfig() {
+        var defaultConfig = new[]
+        {
+            "# Формат: ChatEnabled|RewardEnabled|Команда|НазваниеНаграды|Файл|Стоимость|Cooldown",
+            "true|true|!аттеншен|Аттеншен!|attention.mp3|500|180",
+            "true|true|!ааа|А-а-а-а-а|aaaa.mp3|1500|180"
+        };
+
+        File.WriteAllLines(configFile, defaultConfig);
+    }
+
+    private void WriteColor(string text, ConsoleColor color) {
+        var originalColor = Console.ForegroundColor;
+        Console.ForegroundColor = color;
+        Console.Write(text);
+        Console.ForegroundColor = originalColor;
+    }
+} 
+-------------------------------------------------------- 
+ 
+ 
+==================== Файл: E:\_dev\_tests\TwitchKarmikKoalaSoundComands\TwitchKarmikKoalaSoundComands\Core\SettingsManager.cs ==================== 
+ 
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+
+public class SettingsManager {
+    private string settingsFile = "config/bot_settings.txt";
+    public BotSettings Settings { get; private set; }
+
+    public SettingsManager() {
+        Settings = new BotSettings();
+        LoadSettings();
+    }
+
+    public void LoadSettings() {
+        if (!Directory.Exists("config")) {
+            Directory.CreateDirectory("config");
+        }
+
+        if (!File.Exists(settingsFile)) {
+            CreateDefaultSettings();
+            throw new Exception($"Создан файл настроек {settingsFile}. Заполните его данными перед запуском.");
+        }
+
+        try {
+            var lines = File.ReadAllLines(settingsFile);
+
+            foreach (var line in lines) {
+                if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#"))
+                    continue;
+
+                var parts = line.Split('=');
+                if (parts.Length == 2) {
+                    var key = parts[0].Trim().ToLower();
+                    var value = parts[1].Trim();
+
+                    switch (key) {
+                        case "bot_username":
+                            Settings.BotUsername = value;
+                            break;
+                        case "oauth_token":
+                            Settings.OAuthToken = value.StartsWith("oauth:") ? value : "oauth:" + value;
+                            break;
+                        case "client_id":
+                            Settings.ClientId = value;
+                            break;
+                        case "channel_name":
+                            Settings.ChannelName = value;
+                            break;
+                        case "sounds_directory":
+                            Settings.SoundsDirectory = NormalizePath(value);
+                            break;
+                        case "cooldown_seconds":
+                            if (int.TryParse(value, out int cooldown))
+                                Settings.DefaultCooldown = cooldown;
+                            break;
+                        case "chat_enabled":
+                            if (bool.TryParse(value, out bool chatEnabled))
+                                Settings.ChatEnabled = chatEnabled;
+                            break;
+                        case "rewards_enabled":
+                            if (bool.TryParse(value, out bool rewardsEnabled))
+                                Settings.RewardsEnabled = rewardsEnabled;
+                            break;
+                        case "debug_mode":
+                            if (bool.TryParse(value, out bool debugMode))
+                                Settings.DebugMode = debugMode;
+                            break;
+                        case "volume":
+                            if (int.TryParse(value, out int volume))
+                                Settings.Volume = Math.Clamp(volume, 0, 100);
+                            break;
+
+                        case "enable_vip_reward":
+                            if (bool.TryParse(value, out bool enableVipReward))
+                                Settings.EnableVipReward = enableVipReward;
+                            break;
+                        case "max_vip_count":
+                            if (int.TryParse(value, out int maxVipCount))
+                                Settings.MaxVipCount = maxVipCount;
+                            break;
+                        case "vip_reward_cost":
+                            if (int.TryParse(value, out int vipRewardCost))
+                                Settings.VipRewardCost = vipRewardCost;
+                            break;
+                        case "vip_cooldown":
+                            if (int.TryParse(value, out int vipCooldown))
+                                Settings.VipCooldown = vipCooldown;
+                            break;
+                        case "vip_duration_days":
+                            if (int.TryParse(value, out int vipDurationDays))
+                                Settings.VipDurationDays = vipDurationDays;
+                            break;
+                        case "enable_vip_steal_reward":
+                            if (bool.TryParse(value, out bool enableVipStealReward))
+                                Settings.EnableVipStealReward = enableVipStealReward;
+                            break;
+                        case "vip_steal_cost":
+                            if (int.TryParse(value, out int vipStealCost))
+                                Settings.VipStealCost = vipStealCost;
+                            break;
+                        case "vip_steal_chance":
+                            if (int.TryParse(value, out int vipStealChance))
+                                Settings.VipStealChance = vipStealChance;
+                            break;
+                        case "vip_steal_ban_time":
+                            if (int.TryParse(value, out int vipStealBanTime))
+                                Settings.VipStealBanTime = vipStealBanTime;
+                            break;
+
+                        case "music_tracker_enabled":
+                            if (bool.TryParse(value, out bool musicTrackerEnabled))
+                                Settings.MusicTrackerEnabled = musicTrackerEnabled;
+                            break;
+                        case "music_tracker_port":
+                            if (int.TryParse(value, out int musicTrackerPort))
+                                Settings.MusicTrackerPort = musicTrackerPort;
+                            break;
+                        case "music_command_keywords":
+                            Settings.MusicCommandKeywords = value;
+                            break;
+                        case "music_response_template":
+                            Settings.MusicResponseTemplate = value;
+                            break;
+                        case "no_music_response_template":
+                            Settings.NoMusicResponseTemplate = value;
+                            break;
+                    }
+                }
+            }
+
+            if (string.IsNullOrEmpty(Settings.BotUsername) ||
+                string.IsNullOrEmpty(Settings.OAuthToken) ||
+                string.IsNullOrEmpty(Settings.ClientId) ||
+                string.IsNullOrEmpty(Settings.ChannelName)) {
+                throw new Exception("Не все обязательные поля заполнены в файле настроек!");
+            }
+
+            if (!Directory.Exists(Settings.SoundsDirectory)) {
+                Directory.CreateDirectory(Settings.SoundsDirectory);
+            }
+        } catch (Exception ex) {
+            throw new Exception($"Ошибка загрузки настроек: {ex.Message}");
+        }
+    }
+
+    public void SaveSettings() {
+        try {
+            var lines = new List<string>
+            {
+                "# Настройки Twitch Sound Bot",
+                "# Обязательные поля:",
+                $"bot_username={Settings.BotUsername}",
+                $"oauth_token={Settings.OAuthToken}",
+                $"client_id={Settings.ClientId}",
+                $"channel_name={Settings.ChannelName}",
+                "",
+                "# Дополнительные настройки:",
+                $"sounds_directory={Settings.SoundsDirectory}",
+                $"cooldown_seconds={Settings.DefaultCooldown}",
+                $"chat_enabled={Settings.ChatEnabled}",
+                $"rewards_enabled={Settings.RewardsEnabled}",
+                $"debug_mode={Settings.DebugMode}",
+                $"volume={Settings.Volume}",
+                "",
+                "# Настройки VIP:",
+                $"enable_vip_reward={Settings.EnableVipReward}",
+                $"vip_reward_cost={Settings.VipRewardCost}",
+                $"vip_cooldown={Settings.VipCooldown}",
+                $"vip_duration_days={Settings.VipDurationDays}",
+                "",
+                "# Настройки кражи VIP:",
+                $"enable_vip_steal_reward={Settings.EnableVipStealReward}",
+                $"vip_steal_cost={Settings.VipStealCost}",
+                $"vip_steal_chance={Settings.VipStealChance}",
+                $"vip_steal_ban_time={Settings.VipStealBanTime}",
+                "",
+                "# Настройки музыки:",
+                $"music_tracker_enabled={Settings.MusicTrackerEnabled}",
+                $"music_tracker_port={Settings.MusicTrackerPort}",
+                $"music_command_keywords={Settings.MusicCommandKeywords}",
+                $"music_response_template={Settings.MusicResponseTemplate}",
+                $"no_music_response_template={Settings.NoMusicResponseTemplate}"
+            };
+
+            File.WriteAllLines(settingsFile, lines);
+        } catch (Exception ex) {
+            WriteColor($"Ошибка сохранения настроек: {ex.Message}\n", ConsoleColor.Red);
+        }
+    }
+
+    private void CreateDefaultSettings() {
+        var defaultSettings = new[]
+        {
+            "# Настройки Twitch Sound Bot",
+            "# Обязательные поля:",
+            "bot_username=your_bot_username",
+            "oauth_token=oauth:your_oauth_token_here",
+            "client_id=your_client_id_here",
+            "channel_name=your_channel_name",
+            "",
+            "# Дополнительные настройки:",
+            "sounds_directory=sounds",
+            "cooldown_seconds=30",
+            "chat_enabled=true",
+            "rewards_enabled=true",
+            "debug_mode=false",
+            "volume=50",
+            "",
+            "# Настройки лимита VIP:",
+            "max_vip_count=50",
+            "# Настройки Покупки VIP:",
+            "enable_vip_reward=false",
+            "vip_reward_cost=150000",
+            "vip_cooldown=10", // в минутах
+            "vip_duration_days=30",
+            "",
+            "# Настройки Кражи VIP:",
+            "enable_vip_steal_reward=false",
+            "vip_steal_cost=50000",
+            "vip_steal_chance=5", // в процентах
+            "vip_steal_ban_time=180", // в минутах
+            "",
+            "# Настройки музыки:",
+            "music_tracker_enabled=true",
+            "music_tracker_port=8080",
+            "music_command_keywords=!music;!музыка;!song;!track;!трек",
+            "music_response_template=$name, сейчас играет: $trackName $trackLink",
+            "no_music_response_template=$name, сейчас ничего не играет"
+        };
+
+        File.WriteAllLines(settingsFile, defaultSettings);
+    }
+
+    private string NormalizePath(string path) {
+        if (Path.IsPathRooted(path)) {
+            return path;
+        }
+
+        return Path.Combine(Directory.GetCurrentDirectory(), path);
+    }
+
+    private void WriteColor(string text, ConsoleColor color) {
+        var originalColor = Console.ForegroundColor;
+        Console.ForegroundColor = color;
+        Console.Write(text);
+        Console.ForegroundColor = originalColor;
+    }
+} 
+-------------------------------------------------------- 
+ 
+ 
+==================== Файл: E:\_dev\_tests\TwitchKarmikKoalaSoundComands\TwitchKarmikKoalaSoundComands\Core\StatisticsDisplay.cs ==================== 
+ 
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+
+public class StatisticsDisplay {
+    private readonly TwitchBot _bot;
+    private readonly VipManager _vipManager;
+    private readonly CommandManager _commandManager;
+    private readonly BotSettings _settings;
+
+    // Статистика в реальном времени
+    public int TotalSoundActivations { get; private set; }
+    public int TotalPointsSpent { get; private set; }
+    public string LastSoundActivator { get; private set; } = "нет";
+    public string LastSoundCommand { get; private set; } = "нет";
+    public DateTime LastSoundActivationTime { get; private set; }
+
+    public int VipCount { get; private set; }
+    public string LastVipPurchase { get; private set; } = "нет";
+    public DateTime LastVipPurchaseTime { get; private set; }
+
+    public int TotalStealAttempts { get; private set; }
+    public string LastFailedStealer { get; private set; } = "нет";
+    public string LastSuccessfulSteal { get; private set; } = "нет";
+    public string LastStealVictim { get; private set; } = "нет";
+    public DateTime LastStealTime { get; private set; }
+
+    private CancellationTokenSource _cancellationTokenSource;
+    private bool _isRunning = false;
+
+    public StatisticsDisplay(TwitchBot bot, VipManager vipManager, CommandManager commandManager, BotSettings settings) {
+        _bot = bot;
+        _vipManager = vipManager;
+        _commandManager = commandManager;
+        _settings = settings;
+    }
+
+    public void Start() {
+        if (_isRunning)
+            return;
+
+        _isRunning = true;
+        _cancellationTokenSource = new CancellationTokenSource();
+
+        Task.Run(async () => await UpdateLoop(_cancellationTokenSource.Token));
+
+        WriteColor("✅ Модуль статистики запущен\n", ConsoleColor.Green);
+    }
+
+    public void Stop() {
+        if (!_isRunning)
+            return;
+
+        _isRunning = false;
+        _cancellationTokenSource?.Cancel();
+        WriteColor("✅ Модуль статистики остановлен\n", ConsoleColor.Yellow);
+    }
+
+    private async Task UpdateLoop(CancellationToken cancellationToken) {
+        while (!cancellationToken.IsCancellationRequested) {
+            try {
+                UpdateStatistics();
+                await Task.Delay(2000, cancellationToken); // Обновление каждые 2 секунды
+            } catch (TaskCanceledException) {
+                break;
+            } catch (Exception ex) {
+                if (_settings.DebugMode) {
+                    WriteColor($"❌ Ошибка обновления статистики: {ex.Message}\n", ConsoleColor.Red);
+                }
+                await Task.Delay(5000, cancellationToken);
+            }
+        }
+    }
+
+    private async void UpdateStatistics() {
+        try {
+            // Обновляем статистику VIP
+            if (_vipManager != null) {
+                try {
+                    // Пробуем получить количество VIP разными способами
+                    VipCount = await _vipManager.GetActiveVipCountAsync();
+
+                    // Если получили 0, но должны быть VIP, используем fallback
+                    if (VipCount == 0) {
+                        var vipUsers = _vipManager.GetVipUsers();
+                        VipCount = vipUsers.Count;
+
+                        if (VipCount == 0 && _settings.DebugMode) {
+                            WriteColor($"⚠️ Не удалось получить количество VIP\n", ConsoleColor.Yellow);
+                        }
+                    }
+                } catch (Exception ex) {
+                    if (_settings.DebugMode) {
+                        WriteColor($"⚠️ Ошибка получения VIP статистики: {ex.Message}\n", ConsoleColor.Yellow);
+                    }
+                    // Fallback: используем локальный подсчет
+                    VipCount = _vipManager.GetActiveVipCount();
+                }
+            }
+        } catch (Exception ex) {
+            if (_settings.DebugMode) {
+                WriteColor($"❌ Ошибка получения статистики: {ex.Message}\n", ConsoleColor.Red);
+            }
+        }
+    }
+
+    // Методы для обновления статистики из других частей программы
+    public void RecordSoundActivation(string username, string command, int cost) {
+        try {
+            TotalSoundActivations++;
+            TotalPointsSpent += cost;
+            LastSoundActivator = username;
+            LastSoundCommand = GetCommandDisplayName(command);
+            LastSoundActivationTime = DateTime.Now;
+        } catch (Exception ex) {
+            if (_settings.DebugMode) {
+                WriteColor($"❌ Ошибка записи статистики звуков: {ex.Message}\n", ConsoleColor.Red);
+            }
+        }
+    }
+
+    public void RecordVipPurchase(string username) {
+        try {
+            if (_vipManager != null) {
+                LastVipPurchase = username;
+                LastVipPurchaseTime = DateTime.Now;
+                VipCount = _vipManager.GetActiveVipCount(); // Используем новый метод
+            }
+        } catch (Exception ex) {
+            if (_settings.DebugMode) {
+                WriteColor($"❌ Ошибка записи статистики VIP: {ex.Message}\n", ConsoleColor.Red);
+            }
+        }
+    }
+
+    public void RecordStealAttempt(string thiefName, bool success, string victimName = null) {
+        try {
+            if (_vipManager != null) {
+                TotalStealAttempts++;
+
+                if (success) {
+                    LastSuccessfulSteal = thiefName;
+                    LastStealVictim = victimName;
+                    LastStealTime = DateTime.Now;
+                } else {
+                    LastFailedStealer = thiefName;
+                }
+
+                VipCount = _vipManager.GetActiveVipCount(); // Используем новый метод
+            }
+        } catch (Exception ex) {
+            if (_settings.DebugMode) {
+                WriteColor($"❌ Ошибка записи статистики краж: {ex.Message}\n", ConsoleColor.Red);
+            }
+        }
+    }
+
+    public void DisplayStatistics(int left, int top) {
+        try {
+            // Сохраняем текущую позицию курсора
+            int originalLeft = Console.CursorLeft;
+            int originalTop = Console.CursorTop;
+
+            // Устанавливаем позицию для вывода статистики
+            Console.SetCursorPosition(left, top);
+
+            // Очищаем только область статистики (примерно 10 строк)
+            ClearArea(left, top, 80, 10);
+
+            // Звуковые команды
+            Console.Write("🔊 Звуковые команды: ");
+            WriteColor($"{TotalSoundActivations} активаций", ConsoleColor.White);
+            Console.Write(" (");
+            WriteColor($"{TotalPointsSpent} баллов", ConsoleColor.Yellow);
+            Console.WriteLine(")");
+            Console.Write("   Последняя: ");
+            WriteColor(LastSoundActivator, ConsoleColor.Green);
+
+            // Добавляем название команды/награды
+            if (LastSoundCommand != "нет") {
+                Console.Write(" (");
+                WriteColor(LastSoundCommand, ConsoleColor.Cyan);
+                Console.Write(")");
+            }
+
+            // Выводим время только если была активация
+            if (LastSoundActivationTime > DateTime.MinValue && LastSoundActivator != "нет") {
+                Console.Write(" - ");
+                WriteColor(LastSoundActivationTime.ToString("dd.MM HH:mm"), ConsoleColor.Gray);
+            }
+            Console.WriteLine();
+
+            // VIP статистика - ИСПРАВЛЕНО: используем актуальное количество VIP
+            Console.Write("⭐ VIP на канале: ");
+            WriteColor($"{VipCount}/{_settings.MaxVipCount}", ConsoleColor.Magenta);
+            Console.WriteLine();
+            // Статус награды покупки VIP
+            Console.Write("   Награда 'Купить VIP': ");
+            var purchaseAvailable = VipCount < _settings.MaxVipCount;
+            WriteColor(purchaseAvailable ? "ДОСТУПНА" : "НЕДОСТУПНА",
+                      purchaseAvailable ? ConsoleColor.Green : ConsoleColor.Red);
+            Console.WriteLine();
+            Console.Write("   Последняя покупка: ");
+            WriteColor(LastVipPurchase, ConsoleColor.Green);
+
+            // Выводим время только если была покупка
+            if (LastVipPurchaseTime > DateTime.MinValue && LastVipPurchase != "нет") {
+                Console.Write(" - ");
+                WriteColor(LastVipPurchaseTime.ToString("dd.MM HH:mm"), ConsoleColor.Gray);
+            }
+            Console.WriteLine();
+
+            // Кражи VIP
+            Console.Write("🎭 Попыток кражи VIP: ");
+            WriteColor($"{TotalStealAttempts}", ConsoleColor.White);
+            Console.WriteLine();
+            Console.Write("   Последний неудачник: ");
+            WriteColor(LastFailedStealer, ConsoleColor.Red);
+            Console.WriteLine();
+            Console.Write("   Последняя кража: ");
+            WriteColor(LastSuccessfulSteal, ConsoleColor.Green);
+            if (!string.IsNullOrEmpty(LastStealVictim) && LastStealVictim != "нет") {
+                Console.Write(" → ");
+                WriteColor(LastStealVictim, ConsoleColor.Yellow);
+            }
+
+            // Выводим время только если была кража
+            if (LastStealTime > DateTime.MinValue && LastSuccessfulSteal != "нет") {
+                Console.Write(" - ");
+                WriteColor(LastStealTime.ToString("dd.MM HH:mm"), ConsoleColor.Gray);
+            }
+            Console.WriteLine();
+            Console.WriteLine();
+
+            // Восстанавливаем позицию курсора
+            Console.SetCursorPosition(originalLeft, originalTop);
+        } catch (Exception ex) {
+            if (_settings.DebugMode) {
+                WriteColor($"❌ Ошибка отображения статистики: {ex.Message}\n", ConsoleColor.Red);
+            }
+        }
+    }
+
+    // Метод для получения отображаемого названия команды/награды
+    private string GetCommandDisplayName(string command) {
+        try {
+            if (_commandManager == null)
+                return command;
+
+            var soundCommand = _commandManager.GetCommand(command);
+            if (soundCommand != null) {
+                // Возвращаем название награды, если оно есть, иначе саму команду
+                return !string.IsNullOrEmpty(soundCommand.RewardTitle) ?
+                    soundCommand.RewardTitle : command;
+            }
+
+            // Для VIP команд возвращаем понятные названия
+            if (command == "VIP_PURCHASE" || command.Contains("Купить VIP"))
+                return "Купить VIP";
+            if (command == "VIP_STEAL" || command.Contains("Украсть VIP"))
+                return "Украсть VIP";
+
+            return command;
+        } catch {
+            return command;
+        }
+    }
+
+    private void ClearArea(int left, int top, int width, int height) {
+        try {
+            string clearLine = new string(' ', width);
+            for (int i = 0; i < height; i++) {
+                Console.SetCursorPosition(left, top + i);
+                Console.Write(clearLine);
+            }
+            Console.SetCursorPosition(left, top);
+        } catch (Exception ex) {
+            // Игнорируем ошибки очистки
+            if (_settings.DebugMode) {
+                WriteColor($"⚠️ Ошибка очистки области: {ex.Message}\n", ConsoleColor.Yellow);
+            }
+        }
+    }
+
+    private void WriteColor(string text, ConsoleColor color) {
+        var originalColor = Console.ForegroundColor;
+        Console.ForegroundColor = color;
+        Console.Write(text);
+        Console.ForegroundColor = originalColor;
+    }
+} 
+-------------------------------------------------------- 
+ 
+ 
+==================== Файл: E:\_dev\_tests\TwitchKarmikKoalaSoundComands\TwitchKarmikKoalaSoundComands\Core\VipManager.cs ==================== 
+ 
+﻿using System;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Text.Json;
+using System.Threading.Tasks;
+using TwitchLib.Api;
+using TwitchLib.Api.Helix.Models.ChannelPoints;
+using TwitchLib.Api.Helix.Models.ChannelPoints.CreateCustomReward;
+using TwitchLib.Api.Helix.Models.ChannelPoints.UpdateCustomReward;
+using System.Net.Http;
+using System.Text;
+
+public class VipManager {
+    private TwitchAPI api;
+    private string channelId;
+    private BotSettings settings;
+    private string vipListFile = "config/vip_list.json";
+    private List<VipItem> vipList = new List<VipItem>();
+    private Random random = new Random();
+
+    private List<string> successfulStealMessages = new List<string>();
+    private List<string> failedStealMessages = new List<string>();
+
+    private DateTime lastSyncTime = DateTime.MinValue;
+    private readonly TimeSpan syncCooldown = TimeSpan.FromMinutes(5);
+
+    public string LastError { get; private set; } = "";
+    private const int MAX_REWARDS = 50;
+    private const int MAX_VIP_LIMIT = 100;
+
+    public VipManager(TwitchAPI api, string channelId, BotSettings settings) {
+        this.api = api;
+        this.channelId = channelId;
+        this.settings = settings;
+
+        if (!Directory.Exists("config")) {
+            Directory.CreateDirectory("config");
+        }
+
+        LoadVipList();
+        LoadStealMessages();
+    }
+
+    public async Task<bool> CreateVipRewards() {
+        try {
+            WriteDebug($"=== СОЗДАНИЕ VIP НАГРАД ===\n", ConsoleColor.Cyan);
+
+            if (string.IsNullOrEmpty(channelId)) {
+                LastError = "ChannelId не доступен";
+                WriteColor($"❌ {LastError}\n", ConsoleColor.Red);
+                return false;
+            }
+
+            var existingRewardsResponse = await api.Helix.ChannelPoints.GetCustomRewardAsync(channelId, new List<string>(), true);
+
+            if (existingRewardsResponse == null || existingRewardsResponse.Data == null) {
+                LastError = "Не удалось получить список существующих наград";
+                WriteColor($"❌ {LastError}\n", ConsoleColor.Red);
+                return false;
+            }
+
+            var existingRewards = existingRewardsResponse.Data;
+            WriteDebug($"✅ Найдено существующих наград: {existingRewards.Length}\n", ConsoleColor.Green);
+
+            bool vipPurchaseCreated = false;
+            bool vipStealCreated = false;
+
+            await Task.Delay(500);
+            if (settings.EnableVipReward) {
+                vipPurchaseCreated = await CreateOrUpdateVipReward(
+                    "Купить VIP",
+                    settings.VipRewardCost,
+                    settings.VipCooldown * 60,
+                    "#FFD700",
+                    existingRewards
+                );
+            }
+
+            await Task.Delay(500);
+            if (settings.EnableVipStealReward) {
+                vipStealCreated = await CreateOrUpdateVipReward(
+                    "Украсть VIP",
+                    settings.VipStealCost,
+                    600,
+                    "#FF0000",
+                    existingRewards
+                );
+            }
+
+            WriteDebug($"\n=== РЕЗУЛЬТАТ СОЗДАНИЯ VIP НАГРАД ===\n", ConsoleColor.Cyan);
+            if (settings.EnableVipReward) {
+                WriteDebug($"Купить VIP: {(vipPurchaseCreated ? "✅" : "❌")}\n",
+                          vipPurchaseCreated ? ConsoleColor.Green : ConsoleColor.Red);
+            }
+            if (settings.EnableVipStealReward) {
+                WriteDebug($"Украсть VIP: {(vipStealCreated ? "✅" : "❌")}\n",
+                          vipStealCreated ? ConsoleColor.Green : ConsoleColor.Red);
+            }
+
+            return (settings.EnableVipReward ? vipPurchaseCreated : true) &&
+                   (settings.EnableVipStealReward ? vipStealCreated : true);
+
+        } catch (Exception ex) {
+            LastError = $"Критическая ошибка создания VIP наград: {ex.Message}";
+            WriteDebug($"❌ {LastError}\n", ConsoleColor.Red);
+            return false;
+        }
+    }
+
+    private async Task<bool> CreateOrUpdateVipReward(string rewardTitle, int cost, int cooldownSeconds = 0, string color = "", CustomReward[] existingRewards = null) {
+        try {
+            WriteDebug($"🔍 Обрабатываем VIP награду: '{rewardTitle}'\n", ConsoleColor.Cyan);
+
+            var existingReward = existingRewards?.FirstOrDefault(r =>
+                r.Title.ToLower() == rewardTitle.ToLower());
+
+            if (existingReward != null) {
+                WriteDebug($"  ✅ Награда существует, обновляю...\n", ConsoleColor.Green);
+
+                var updateRequest = new UpdateCustomRewardRequest {
+                    Cost = cost,
+                    IsEnabled = true
+                };
+
+                try {
+                    var updatedReward = await api.Helix.ChannelPoints.UpdateCustomRewardAsync(
+                        channelId, existingReward.Id, updateRequest);
+
+                    if (updatedReward != null) {
+                        WriteColor($"  ✅ Награда '{rewardTitle}' обновлена\n", ConsoleColor.Green);
+                        return true;
+                    }
+                } catch (Exception updateEx) {
+                    WriteColor($"  ❌ Ошибка обновления награды '{rewardTitle}': {updateEx.Message}\n", ConsoleColor.Red);
+                }
+            } else {
+                WriteDebug($"  ➕ Создаю новую VIP награду...\n", ConsoleColor.Yellow);
+                return await CreateNewVipReward(rewardTitle, cost, cooldownSeconds, color);
+            }
+
+            return false;
+        } catch (Exception ex) {
+            WriteColor($"  ❌ Критическая ошибка обработки награды '{rewardTitle}': {ex.Message}\n", ConsoleColor.Red);
+            return false;
+        }
+    }
+
+    private async Task<bool> CreateNewVipReward(string rewardTitle, int cost, int cooldownSeconds, string color) {
+        try {
+            var createRequest = new CreateCustomRewardsRequest {
+                Title = rewardTitle,
+                Cost = cost,
+                IsEnabled = true,
+                BackgroundColor = color,
+                IsUserInputRequired = false
+            };
+
+            var result = await api.Helix.ChannelPoints.CreateCustomRewardsAsync(channelId, createRequest);
+
+            if (result != null && result.Data.Length > 0) {
+                WriteColor($"  ✅ Награда '{rewardTitle}' создана\n", ConsoleColor.Green);
+                return true;
+            } else {
+                WriteColor($"  ❌ Награда '{rewardTitle}' не создана - пустой ответ\n", ConsoleColor.Red);
+            }
+        } catch (Exception createEx) {
+            WriteColor($"  ❌ Ошибка создания награды '{rewardTitle}': {createEx.Message}\n", ConsoleColor.Red);
+        }
+
+        return false;
+    }
+
+    public async Task DisableVipRewards() {
+        try {
+            if (string.IsNullOrEmpty(channelId)) {
+                WriteColor("❌ ChannelId не доступен для отключения VIP наград\n", ConsoleColor.Red);
+                return;
+            }
+
+            var rewards = await api.Helix.ChannelPoints.GetCustomRewardAsync(channelId, onlyManageableRewards: true);
+            var vipRewards = rewards.Data.Where(r => r.Title == "Купить VIP" || r.Title == "Украсть VIP").ToList();
+
+            foreach (var reward in vipRewards) {
+                try {
+                    var updateRequest = new UpdateCustomRewardRequest { IsEnabled = false };
+                    await api.Helix.ChannelPoints.UpdateCustomRewardAsync(channelId, reward.Id, updateRequest);
+                    WriteDebug($"Награда '{reward.Title}' отключена\n", ConsoleColor.Yellow);
+                    await Task.Delay(200);
+                } catch (Exception ex) {
+                    WriteDebug($"Ошибка отключения награды '{reward.Title}': {ex.Message}\n", ConsoleColor.Red);
+                }
+            }
+        } catch (Exception ex) {
+            WriteDebug($"Ошибка при отключении VIP наград: {ex.Message}\n", ConsoleColor.Red);
+        }
+    }
+
+    // ОСНОВНОЙ МЕТОД: Получение VIP через Twitch API с проверкой прав
+    private async Task<List<string>> GetRealVipUsersFromTwitchAsync() {
+        try {
+            WriteDebug($"🔍 Запрос списка VIP с Twitch API...\n", ConsoleColor.Cyan);
+
+            using (var httpClient = new HttpClient()) {
+                // Устанавливаем заголовки для Twitch API
+                httpClient.DefaultRequestHeaders.Add("Client-ID", api.Settings.ClientId);
+                httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {api.Settings.AccessToken}");
+
+                string url = $"https://api.twitch.tv/helix/channels/vips?broadcaster_id={channelId}&first=100";
+                WriteDebug($"📤 URL: {url}\n", ConsoleColor.Yellow);
+
+                var response = await httpClient.GetAsync(url);
+                var responseContent = await response.Content.ReadAsStringAsync();
+
+                WriteDebug($"📥 Статус: {response.StatusCode}\n", ConsoleColor.Yellow);
+
+                if (settings.DebugMode) {
+                    WriteDebug($"📄 Ответ: {responseContent}\n", ConsoleColor.Gray);
+                }
+
+                if (response.IsSuccessStatusCode) {
+                    using (JsonDocument doc = JsonDocument.Parse(responseContent)) {
+                        var vips = new List<string>();
+
+                        if (doc.RootElement.TryGetProperty("data", out JsonElement dataElement)) {
+                            foreach (JsonElement vipElement in dataElement.EnumerateArray()) {
+                                string username = null;
+
+                                // Пробуем разные возможные поля с именем
+                                if (vipElement.TryGetProperty("user_login", out JsonElement loginElement)) {
+                                    username = loginElement.GetString();
+                                } else if (vipElement.TryGetProperty("user_name", out JsonElement nameElement)) {
+                                    username = nameElement.GetString();
+                                } else if (vipElement.TryGetProperty("login", out JsonElement loginElement2)) {
+                                    username = loginElement2.GetString();
+                                }
+
+                                if (!string.IsNullOrEmpty(username)) {
+                                    vips.Add(username.ToLower());
+                                    WriteDebug($"✅ VIP: {username}\n", ConsoleColor.Green);
+                                }
+                            }
+                        }
+
+                        WriteDebug($"✅ Получено VIP: {vips.Count}\n", ConsoleColor.Green);
+                        return vips;
+                    }
+                } else {
+                    WriteDebug($"❌ Ошибка API: {response.StatusCode}\n", ConsoleColor.Red);
+
+                    // Анализируем ошибку
+                    if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized) {
+                        WriteDebug($"🔐 Ошибка 401: Неверный токен\n", ConsoleColor.Red);
+                    } else if (response.StatusCode == System.Net.HttpStatusCode.Forbidden) {
+                        WriteDebug($"🚫 Ошибка 403: Недостаточно прав. Нужен scope: channel:read:vips\n", ConsoleColor.Red);
+                    } else if (response.StatusCode == System.Net.HttpStatusCode.NotFound) {
+                        WriteDebug($"🔍 Ошибка 404: Endpoint не найден\n", ConsoleColor.Red);
+                    } else {
+                        WriteDebug($"❌ Другая ошибка: {responseContent}\n", ConsoleColor.Red);
+                    }
+                }
+            }
+        } catch (Exception ex) {
+            WriteDebug($"❌ Исключение при запросе VIP: {ex.Message}\n", ConsoleColor.Red);
+        }
+
+        return new List<string>();
+    }
+
+    // МЕТОД СИНХРОНИЗАЦИИ С ДЕТАЛЬНЫМ ЛОГИРОВАНИЕМ
+    public async Task SyncWithRealVipList() {
+        try {
+            // Увеличиваем интервал синхронизации до 10 минут чтобы избежать спама
+            if (DateTime.Now - lastSyncTime < TimeSpan.FromMinutes(10)) {
+                return;
+            }
+
+            WriteColor($"🔄 Синхронизация VIP списка...\n", ConsoleColor.Cyan);
+            lastSyncTime = DateTime.Now;
+
+            // Получаем реальных VIP с Twitch
+            var realVips = await GetRealVipUsersFromTwitchAsync();
+
+            if (!realVips.Any()) {
+                WriteColor($"⚠️ Не удалось получить VIP с Twitch или их нет\n", ConsoleColor.Yellow);
+                return;
+            }
+
+            WriteDebug($"📋 Найдено VIP на канале: {realVips.Count}\n", ConsoleColor.Green);
+
+            // Очищаем некорректные записи (старая логика)
+            var invalidEntries = vipList.Where(v =>
+                v.Username.StartsWith("[{\"") ||
+                v.Username.Contains("\\u") ||
+                string.IsNullOrWhiteSpace(v.Username)).ToList();
+
+            foreach (var invalid in invalidEntries) {
+                vipList.Remove(invalid);
+                WriteDebug($"🗑️ Удалена некорректная запись: {invalid.Username}\n", ConsoleColor.Yellow);
+            }
+
+            // ОСНОВНОЕ ИСПРАВЛЕНИЕ: Обновляем даты для существующих VIP
+            int updatedCount = 0;
+            int addedCount = 0;
+
+            foreach (var vipUsername in realVips) {
+                var normalizedUsername = vipUsername.ToLower();
+                var existingVip = vipList.FirstOrDefault(v =>
+                    v.Username.Equals(normalizedUsername, StringComparison.OrdinalIgnoreCase));
+
+                if (existingVip != null) {
+                    // ОБНОВЛЯЕМ дату окончания если VIP просрочен или дата некорректная
+                    if (existingVip.IsExpired || existingVip.ExpiryDate.Year < 2024) {
+                        existingVip.GrantDate = DateTime.Now;
+                        existingVip.ExpiryDate = DateTime.Now.AddDays(settings.VipDurationDays);
+                        updatedCount++;
+                        WriteDebug($"🔄 Обновлен срок VIP: {normalizedUsername}\n", ConsoleColor.Yellow);
+                    }
+                } else {
+                    // Добавляем нового VIP
+                    var newVip = new VipItem(normalizedUsername, DateTime.Now, settings.VipDurationDays);
+                    vipList.Add(newVip);
+                    addedCount++;
+                    WriteDebug($"➕ Добавлен VIP: {normalizedUsername}\n", ConsoleColor.Green);
+                }
+            }
+
+            // Удаляем VIP которых нет на канале (опционально)
+            var vipUsernames = realVips.Select(v => v.ToLower()).ToList();
+            var missingVips = vipList.Where(v => !vipUsernames.Contains(v.Username.ToLower())).ToList();
+
+            foreach (var missing in missingVips) {
+                vipList.Remove(missing);
+                WriteDebug($"➖ Удален отсутствующий VIP: {missing.Username}\n", ConsoleColor.Gray);
+            }
+
+            // Сохраняем обновленный список
+            SaveVipList();
+
+            var activeVips = vipList.Count(v => !v.IsExpired);
+            WriteColor($"✅ Синхронизация завершена:\n", ConsoleColor.Green);
+            WriteColor($"   Активных VIP: {activeVips}\n", ConsoleColor.White);
+            WriteColor($"   Добавлено: {addedCount}\n", ConsoleColor.White);
+            WriteColor($"   Обновлено: {updatedCount}\n", ConsoleColor.White);
+            WriteColor($"   Удалено: {missingVips.Count}\n", ConsoleColor.White);
+
+            if (settings.DebugMode && activeVips > 0) {
+                var vipNames = vipList.Where(v => !v.IsExpired).Select(v => v.Username).ToList();
+                WriteDebug($"📋 Текущие VIP: {string.Join(", ", vipNames)}\n", ConsoleColor.Cyan);
+            }
+
+        } catch (Exception ex) {
+            WriteColor($"❌ Ошибка синхронизации: {ex.Message}\n", ConsoleColor.Red);
+        }
+    }
+
+    public async Task UpdateVipPurchaseRewardAvailability() {
+        try {
+            if (!settings.EnableVipReward || string.IsNullOrEmpty(channelId))
+                return;
+
+            var activeVipCount = await GetActiveVipCountAsync();
+            var isAvailable = activeVipCount < settings.MaxVipCount;
+
+            // Получаем существующие награды
+            var existingRewardsResponse = await api.Helix.ChannelPoints.GetCustomRewardAsync(channelId, new List<string>(), true);
+            var existingRewards = existingRewardsResponse?.Data ?? Array.Empty<CustomReward>();
+
+            var vipPurchaseReward = existingRewards.FirstOrDefault(r =>
+                r.Title.ToLower() == "купить vip");
+
+            if (vipPurchaseReward != null) {
+                // Обновляем доступность награды
+                var updateRequest = new UpdateCustomRewardRequest {
+                    IsEnabled = isAvailable
+                };
+
+                await api.Helix.ChannelPoints.UpdateCustomRewardAsync(channelId, vipPurchaseReward.Id, updateRequest);
+
+                if (settings.DebugMode) {
+                    WriteColor($"✅ Награда 'Купить VIP': {(isAvailable ? "ДОСТУПНА" : "НЕДОСТУПНА")} (VIP: {activeVipCount}/{settings.MaxVipCount})\n",
+                        isAvailable ? ConsoleColor.Green : ConsoleColor.Yellow);
+                }
+            }
+        } catch (Exception ex) {
+            WriteColor($"❌ Ошибка обновления награды покупки VIP: {ex.Message}\n", ConsoleColor.Red);
+        }
+    }
+
+    public async Task<bool> RemoveAllVips(bool confirm = false) {
+        if (!confirm) {
+            WriteColor("⚠️  Для удаления всех VIP требуется подтверждение!\n", ConsoleColor.Yellow);
+            return false;
+        }
+
+        try {
+            WriteColor("🗑️  Удаление всех VIP...\n", ConsoleColor.Red);
+
+            // Получаем реальных VIP с Twitch
+            var realVips = await GetRealVipUsersFromTwitchAsync();
+
+            if (!realVips.Any()) {
+                WriteColor("ℹ️  Нет VIP для удаления\n", ConsoleColor.Yellow);
+                return true;
+            }
+
+            // Очищаем локальный список
+            vipList.Clear();
+            SaveVipList();
+
+            WriteColor($"✅ Удалено {realVips.Count} VIP из локального списка\n", ConsoleColor.Green);
+            WriteColor("ℹ️  Для полного удаления VIP с канала используйте панель управления Twitch\n", ConsoleColor.Yellow);
+
+            return true;
+        } catch (Exception ex) {
+            WriteColor($"❌ Ошибка удаления VIP: {ex.Message}\n", ConsoleColor.Red);
+            return false;
+        }
+    }
+
+    public void ManuallyAddVipUsers(List<string> usernames) {
+        try {
+            WriteColor($"🔄 Ручное добавление VIP...\n", ConsoleColor.Cyan);
+
+            foreach (var username in usernames) {
+                var normalizedUsername = username.ToLower();
+                var existingVip = vipList.FirstOrDefault(v =>
+                    v.Username.Equals(normalizedUsername, StringComparison.OrdinalIgnoreCase));
+
+                if (existingVip == null) {
+                    var newVip = new VipItem(normalizedUsername, DateTime.Now, settings.VipDurationDays);
+                    vipList.Add(newVip);
+                    WriteColor($"✅ Добавлен VIP: {normalizedUsername}\n", ConsoleColor.Green);
+                } else {
+                    existingVip.GrantDate = DateTime.Now;
+                    existingVip.ExpiryDate = DateTime.Now.AddDays(settings.VipDurationDays);
+                    WriteColor($"✅ Обновлен VIP: {normalizedUsername}\n", ConsoleColor.Yellow);
+                }
+            }
+
+            SaveVipList();
+            WriteColor($"✅ Ручное добавление завершено. Всего VIP: {vipList.Count(v => !v.IsExpired)}\n", ConsoleColor.Green);
+        } catch (Exception ex) {
+            WriteColor($"❌ Ошибка ручного добавления: {ex.Message}\n", ConsoleColor.Red);
+        }
+    }
+
+    public async Task<bool> PurchaseVip(string username) {
+        try {
+            await SyncWithRealVipList();
+
+            var currentVips = await GetActiveVipCountAsync();
+
+            // Проверяем лимит
+            if (currentVips >= settings.MaxVipCount) {
+                WriteColor($"❌ Достигнут лимит VIP ({currentVips}/{settings.MaxVipCount})\n", ConsoleColor.Red);
+                await UpdateVipPurchaseRewardAvailability();
+                return false;
+            }
+
+            // Проверяем, не является ли пользователь уже VIP
+            if (await IsVipAsync(username)) {
+                WriteColor($"❌ {username} уже VIP\n", ConsoleColor.Red);
+                return false;
+            }
+
+            // Выдаем VIP
+            var existingVip = vipList.FirstOrDefault(v => v.Username.Equals(username, StringComparison.OrdinalIgnoreCase));
+            if (existingVip != null) {
+                // Продлеваем существующий VIP
+                existingVip.GrantDate = DateTime.Now;
+                existingVip.ExpiryDate = DateTime.Now.AddDays(settings.VipDurationDays);
+                WriteColor($"✅ {username} продлил VIP\n", ConsoleColor.Green);
+            } else {
+                // Создаем новый VIP
+                var vipItem = new VipItem(username, DateTime.Now, settings.VipDurationDays);
+                vipList.Add(vipItem);
+                WriteColor($"✅ {username} стал VIP\n", ConsoleColor.Green);
+            }
+
+            SaveVipList();
+
+            // Обновляем доступность награды
+            await UpdateVipPurchaseRewardAvailability();
+
+            return true;
+
+        } catch (Exception ex) {
+            WriteColor($"❌ Ошибка покупки VIP: {ex.Message}\n", ConsoleColor.Red);
+            return false;
+        }
+    }
+
+    public async Task<int> GetActiveVipCountAsync() {
+        try {
+            await SyncWithRealVipList();
+            return vipList.Count(v => !v.IsExpired);
+        } catch (Exception ex) {
+            WriteDebug($"❌ Ошибка получения количества VIP: {ex.Message}\n", ConsoleColor.Red);
+            return vipList.Count(v => !v.IsExpired);
+        }
+    }
+
+    public int GetActiveVipCount() {
+        try {
+            var task = Task.Run(async () => await GetActiveVipCountAsync());
+            task.Wait(TimeSpan.FromSeconds(5));
+            return task.IsCompleted ? task.Result : vipList.Count(v => !v.IsExpired);
+        } catch {
+            return vipList.Count(v => !v.IsExpired);
+        }
+    }
+
+    public async Task<List<string>> GetVipUsersAsync() {
+        try {
+            await SyncWithRealVipList();
+            return vipList.Where(v => !v.IsExpired).Select(v => v.Username).ToList();
+        } catch (Exception ex) {
+            WriteDebug($"❌ Ошибка получения списка VIP: {ex.Message}\n", ConsoleColor.Red);
+            return vipList.Where(v => !v.IsExpired).Select(v => v.Username).ToList();
+        }
+    }
+
+    public List<string> GetVipUsers() {
+        try {
+            var task = Task.Run(async () => await GetVipUsersAsync());
+            task.Wait(TimeSpan.FromSeconds(5));
+            return task.IsCompleted ? task.Result : vipList.Where(v => !v.IsExpired).Select(v => v.Username).ToList();
+        } catch {
+            return vipList.Where(v => !v.IsExpired).Select(v => v.Username).ToList();
+        }
+    }
+
+    public async Task<bool> IsVipAsync(string username) {
+        try {
+            await SyncWithRealVipList();
+            return vipList.Any(v => v.Username.Equals(username, StringComparison.OrdinalIgnoreCase) && !v.IsExpired);
+        } catch (Exception ex) {
+            WriteDebug($"❌ Ошибка проверки VIP: {ex.Message}\n", ConsoleColor.Red);
+            return vipList.Any(v => v.Username.Equals(username, StringComparison.OrdinalIgnoreCase) && !v.IsExpired);
+        }
+    }
+
+    public bool IsVip(string username) {
+        try {
+            var task = Task.Run(async () => await IsVipAsync(username));
+            task.Wait(TimeSpan.FromSeconds(5));
+            return task.IsCompleted ? task.Result : vipList.Any(v => v.Username.Equals(username, StringComparison.OrdinalIgnoreCase) && !v.IsExpired);
+        } catch {
+            return vipList.Any(v => v.Username.Equals(username, StringComparison.OrdinalIgnoreCase) && !v.IsExpired);
+        }
+    }
+
+    public async Task<(bool success, string stolenFrom)> StealVipAsync(string thiefName) {
+        try {
+            await SyncWithRealVipList();
+
+            if (random.Next(100) >= settings.VipStealChance) {
+                WriteColor($"❌ {thiefName} не смог украсть VIP (шанс {settings.VipStealChance}%)\n", ConsoleColor.Red);
+                return (false, null);
+            }
+
+            var availableVictims = vipList
+                .Where(v => !v.IsExpired && !v.Username.Equals(thiefName, StringComparison.OrdinalIgnoreCase))
+                .Select(v => v.Username)
+                .ToList();
+
+            if (availableVictims.Count == 0) {
+                WriteColor($"❌ Нет жертв для кражи\n", ConsoleColor.Red);
+                return (false, null);
+            }
+
+            var stolenFrom = availableVictims[random.Next(availableVictims.Count)];
+
+            var victimVip = vipList.FirstOrDefault(v => v.Username.Equals(stolenFrom, StringComparison.OrdinalIgnoreCase));
+            if (victimVip != null) {
+                victimVip.ExpiryDate = DateTime.Now.AddMinutes(-1);
+            }
+
+            var existingThiefVip = vipList.FirstOrDefault(v => v.Username.Equals(thiefName, StringComparison.OrdinalIgnoreCase));
+            if (existingThiefVip != null) {
+                existingThiefVip.GrantDate = DateTime.Now;
+                existingThiefVip.ExpiryDate = DateTime.Now.AddDays(settings.VipDurationDays);
+            } else {
+                var thiefVip = new VipItem(thiefName, DateTime.Now, settings.VipDurationDays);
+                vipList.Add(thiefVip);
+            }
+
+            SaveVipList();
+
+            WriteColor($"✅ {thiefName} украл VIP у {stolenFrom}\n", ConsoleColor.Green);
+            return (true, stolenFrom);
+
+        } catch (Exception ex) {
+            WriteColor($"❌ Ошибка кражи VIP: {ex.Message}\n", ConsoleColor.Red);
+            return (false, null);
+        }
+    }
+
+    public (bool success, string stolenFrom) StealVip(string thiefName) {
+        try {
+            var task = Task.Run(async () => await StealVipAsync(thiefName));
+            task.Wait(TimeSpan.FromSeconds(5));
+            return task.IsCompleted ? task.Result : (false, null);
+        } catch {
+            return (false, null);
+        }
+    }
+
+    public string GetRandomSuccessfulStealMessage(string thiefName, string preyName) {
+        if (successfulStealMessages.Count == 0)
+            return $"{thiefName} украл VIP у {preyName}!";
+
+        var message = successfulStealMessages[random.Next(successfulStealMessages.Count)];
+        return message.Replace("$thiefName", thiefName).Replace("$preyName", preyName);
+    }
+
+    public string GetRandomFailedStealMessage(string thiefName) {
+        if (failedStealMessages.Count == 0)
+            return $"{thiefName} попытался украсть VIP и был наказан!";
+
+        var message = failedStealMessages[random.Next(failedStealMessages.Count)];
+        return message.Replace("$thiefName", thiefName);
+    }
+
+    private void LoadVipList() {
+        if (File.Exists(vipListFile)) {
+            try {
+                string json = File.ReadAllText(vipListFile);
+                vipList = JsonSerializer.Deserialize<List<VipItem>>(json) ?? new List<VipItem>();
+                WriteColor($"✅ Загружено VIP записей: {vipList.Count}\n", ConsoleColor.Green);
+
+                var invalidEntries = vipList.Where(v =>
+                    v.Username.StartsWith("[{\"") ||
+                    v.Username.Contains("\\u") ||
+                    string.IsNullOrWhiteSpace(v.Username)).ToList();
+
+                foreach (var invalid in invalidEntries) {
+                    vipList.Remove(invalid);
+                    WriteDebug($"🗑️ Удалена некорректная запись: {invalid.Username}\n", ConsoleColor.Yellow);
+                }
+
+                if (invalidEntries.Count > 0) {
+                    SaveVipList();
+                }
+            } catch (Exception ex) {
+                WriteColor($"❌ Ошибка загрузки VIP: {ex.Message}\n", ConsoleColor.Red);
+                vipList = new List<VipItem>();
+            }
+        } else {
+            WriteColor("ℹ️ Файл VIP не найден, создан новый\n", ConsoleColor.Yellow);
+            vipList = new List<VipItem>();
+        }
+    }
+
+    private void SaveVipList() {
+        try {
+            string json = JsonSerializer.Serialize(vipList, new JsonSerializerOptions { WriteIndented = true });
+            File.WriteAllText(vipListFile, json);
+        } catch (Exception ex) {
+            WriteColor($"❌ Ошибка сохранения VIP: {ex.Message}\n", ConsoleColor.Red);
+        }
+    }
+
+    private void LoadStealMessages() {
+        try {
+            if (File.Exists("config/successful_steal_messages.txt")) {
+                successfulStealMessages = File.ReadAllLines("config/successful_steal_messages.txt")
+                    .Where(line => !string.IsNullOrWhiteSpace(line) && !line.StartsWith("#"))
+                    .ToList();
+            } else {
+                successfulStealMessages = new List<string>
+                {
+                    "$thiefName коварно украл VIP у $preyName!",
+                    "VIP перешел от $preyName к $thiefName в результате дерзкой кражи!",
+                    "$thiefName стащил VIP прямо из-под носа $preyName!",
+                    "Невероятно! $thiefName украл VIP статус у $preyName!"
+                };
+                File.WriteAllLines("config/successful_steal_messages.txt", successfulStealMessages);
+            }
+
+            if (File.Exists("config/failed_steal_messages.txt")) {
+                failedStealMessages = File.ReadAllLines("config/failed_steal_messages.txt")
+                    .Where(line => !string.IsNullOrWhiteSpace(line) && !line.StartsWith("#"))
+                    .ToList();
+            } else {
+                failedStealMessages = new List<string>
+                {
+                    "$thiefName попытался украсть VIP, но был пойман!",
+                    "Кража VIP $thiefName провалилась!",
+                    "$thiefName не смог украсть VIP и будет наказан!",
+                    "Провал! $thiefName был замечен при попытке кражи VIP!"
+                };
+                File.WriteAllLines("config/failed_steal_messages.txt", failedStealMessages);
+            }
+        } catch (Exception ex) {
+            WriteColor($"❌ Ошибка загрузки фраз: {ex.Message}\n", ConsoleColor.Red);
+        }
+    }
+
+    private void WriteDebug(string text, ConsoleColor color) {
+        if (settings.DebugMode) {
+            WriteColor(text, color);
+        }
+    }
+
+    private void WriteColor(string text, ConsoleColor color) {
+        var originalColor = Console.ForegroundColor;
+        Console.ForegroundColor = color;
+        Console.Write(text);
+        Console.ForegroundColor = originalColor;
+    }
+} 
+-------------------------------------------------------- 
+ 
+ 
+==================== Файл: E:\_dev\_tests\TwitchKarmikKoalaSoundComands\TwitchKarmikKoalaSoundComands\Models\BotSettings.cs ==================== 
+ 
+﻿public class BotSettings {
+    public string BotUsername { get; set; } = "";
+    public string OAuthToken { get; set; } = "";
+    public string ClientId { get; set; } = "";
+    public string ChannelName { get; set; } = "";
+    public string SoundsDirectory { get; set; } = "sounds";
+    public int DefaultCooldown { get; set; } = 30;
+    public bool ChatEnabled { get; set; } = true;
+    public bool RewardsEnabled { get; set; } = true;
+    public bool DebugMode { get; set; } = false;
+    public int Volume { get; set; } = 50;
+
+    // Настройки VIP
+    public bool EnableVipReward { get; set; } = false;
+    public int VipRewardCost { get; set; } = 150000;
+    public int VipCooldown { get; set; } = 10; // в минутах
+    public int VipDurationDays { get; set; } = 30;
+
+    // Настройки кражи VIP
+    public int MaxVipCount { get; set; } = 50;
+    public bool EnableVipStealReward { get; set; } = false;
+    public int VipStealCost { get; set; } = 50000;
+    public int VipStealChance { get; set; } = 5; // в процентах
+    public int VipStealBanTime { get; set; } = 180; // в минутах
+
+    public string MusicCommandKeywords { get; set; } = "!music;!музыка;!song;!track;!трек";
+    public string MusicResponseTemplate { get; set; } = "$name, сейчас играет: $trackName $trackLink";
+    public string NoMusicResponseTemplate { get; set; } = "$name, сейчас ничего не играет";
+    public bool MusicTrackerEnabled { get; set; } = true;
+    public int MusicTrackerPort { get; set; } = 8080;
+}
+
+ 
+-------------------------------------------------------- 
+ 
+ 
+==================== Файл: E:\_dev\_tests\TwitchKarmikKoalaSoundComands\TwitchKarmikKoalaSoundComands\Models\SoundCommand.cs ==================== 
+ 
+﻿public class SoundCommand {
+    public string SoundFile { get; set; }
+    public int Cost { get; set; }
+    public int Cooldown { get; set; }
+    public string RewardTitle { get; set; }
+    public bool ChatEnabled { get; set; }
+    public bool RewardEnabled { get; set; }
+
+    public SoundCommand(string soundFile, int cost, int cooldown, string rewardTitle, bool chatEnabled, bool rewardEnabled) {
+        SoundFile = soundFile;
+        Cost = cost;
+        Cooldown = cooldown;
+        RewardTitle = rewardTitle;
+        ChatEnabled = chatEnabled;
+        RewardEnabled = rewardEnabled;
+    }
+}
+ 
+-------------------------------------------------------- 
+ 
+ 
+==================== Файл: E:\_dev\_tests\TwitchKarmikKoalaSoundComands\TwitchKarmikKoalaSoundComands\Models\VipItem.cs ==================== 
+ 
+﻿using System;
+using System.Text.Json.Serialization;
+
+public class VipItem {
+    [JsonPropertyName("username")]
+    public string Username { get; set; }
+
+    [JsonPropertyName("grantDate")]
+    public DateTime GrantDate { get; set; }
+
+    [JsonPropertyName("expiryDate")]
+    public DateTime ExpiryDate { get; set; }
+
+    public VipItem() { }
+
+    public VipItem(string username, DateTime grantDate, int durationDays) {
+        Username = username;
+        GrantDate = grantDate;
+        ExpiryDate = grantDate.AddDays(durationDays);
+    }
+
+    public bool IsExpired => DateTime.Now > ExpiryDate;
+} 
+-------------------------------------------------------- 
+ 
+ 
+==================== Файл: E:\_dev\_tests\TwitchKarmikKoalaSoundComands\TwitchKarmikKoalaSoundComands\obj\Debug\net9.0\.NETCoreApp,Version=v9.0.AssemblyAttributes.cs ==================== 
+ 
+// <autogenerated />
+using System;
+using System.Reflection;
+[assembly: global::System.Runtime.Versioning.TargetFrameworkAttribute(".NETCoreApp,Version=v9.0", FrameworkDisplayName = ".NET 9.0")]
+ 
+-------------------------------------------------------- 
+ 
+ 
+==================== Файл: E:\_dev\_tests\TwitchKarmikKoalaSoundComands\TwitchKarmikKoalaSoundComands\obj\Debug\net9.0\TwitchKarmikKoalaSoundComands.AssemblyInfo.cs ==================== 
+ 
+//------------------------------------------------------------------------------
+// <auto-generated>
+//     This code was generated by a tool.
+//     Runtime Version:4.0.30319.42000
+//
+//     Changes to this file may cause incorrect behavior and will be lost if
+//     the code is regenerated.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+using System;
+using System.Reflection;
+
+[assembly: System.Reflection.AssemblyCompanyAttribute("TwitchKarmikKoalaSoundComands")]
+[assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+2c40f64f20c3093b97dcdfa9d7118329973dd6c6")]
+[assembly: System.Reflection.AssemblyProductAttribute("TwitchKarmikKoalaSoundComands")]
+[assembly: System.Reflection.AssemblyTitleAttribute("TwitchKarmikKoalaSoundComands")]
+[assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
+
+// Generated by the MSBuild WriteCodeFragment class.
+
+ 
+-------------------------------------------------------- 
+ 
+ 
+==================== Файл: E:\_dev\_tests\TwitchKarmikKoalaSoundComands\TwitchKarmikKoalaSoundComands\obj\Debug\net9.0\TwitchKarmikKoalaSoundComands.GlobalUsings.g.cs ==================== 
+ 
+// <auto-generated/>
+global using global::System;
+global using global::System.Collections.Generic;
+global using global::System.IO;
+global using global::System.Linq;
+global using global::System.Net.Http;
+global using global::System.Threading;
+global using global::System.Threading.Tasks;
+ 
+-------------------------------------------------------- 
+ 
+ 
+==================== Файл: E:\_dev\_tests\TwitchKarmikKoalaSoundComands\TwitchKarmikKoalaSoundComands\obj\Release\net9.0\.NETCoreApp,Version=v9.0.AssemblyAttributes.cs ==================== 
+ 
+// <autogenerated />
+using System;
+using System.Reflection;
+[assembly: global::System.Runtime.Versioning.TargetFrameworkAttribute(".NETCoreApp,Version=v9.0", FrameworkDisplayName = ".NET 9.0")]
+ 
+-------------------------------------------------------- 
+ 
+ 
+==================== Файл: E:\_dev\_tests\TwitchKarmikKoalaSoundComands\TwitchKarmikKoalaSoundComands\obj\Release\net9.0\TwitchKarmikKoalaSoundComands.AssemblyInfo.cs ==================== 
+ 
+//------------------------------------------------------------------------------
+// <auto-generated>
+//     This code was generated by a tool.
+//     Runtime Version:4.0.30319.42000
+//
+//     Changes to this file may cause incorrect behavior and will be lost if
+//     the code is regenerated.
+// </auto-generated>
+//------------------------------------------------------------------------------
+
+using System;
+using System.Reflection;
+
+[assembly: System.Reflection.AssemblyCompanyAttribute("TwitchKarmikKoalaSoundComands")]
+[assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
+[assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+f894db10261fdb42696efa98b5e39f0c1d2afcd9")]
+[assembly: System.Reflection.AssemblyProductAttribute("TwitchKarmikKoalaSoundComands")]
+[assembly: System.Reflection.AssemblyTitleAttribute("TwitchKarmikKoalaSoundComands")]
+[assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
+
+// Generated by the MSBuild WriteCodeFragment class.
+
+ 
+-------------------------------------------------------- 
+ 
+ 
+==================== Файл: E:\_dev\_tests\TwitchKarmikKoalaSoundComands\TwitchKarmikKoalaSoundComands\obj\Release\net9.0\TwitchKarmikKoalaSoundComands.GlobalUsings.g.cs ==================== 
+ 
+// <auto-generated/>
+global using global::System;
+global using global::System.Collections.Generic;
+global using global::System.IO;
+global using global::System.Linq;
+global using global::System.Net.Http;
+global using global::System.Threading;
+global using global::System.Threading.Tasks;
+ 
+-------------------------------------------------------- 
+ 
+ 
+==================== Файл: E:\_dev\_tests\TwitchKarmikKoalaSoundComands\TwitchKarmikKoalaSoundComands\Services\FileManager.cs ==================== 
+ 
+﻿using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+
+public class FileManager {
+    private string soundsDirectory;
+    private List<string> missingFiles = new List<string>();
+
+    public FileManager(string soundsDirectory) {
+        this.soundsDirectory = soundsDirectory;
+    }
+
+    public List<string> CheckSoundFiles(Dictionary<string, SoundCommand> soundCommands) {
+        missingFiles.Clear();
+        foreach (var command in soundCommands.Values) {
+            if (!File.Exists(command.SoundFile)) {
+                missingFiles.Add(Path.GetFileName(command.SoundFile));
+            }
+        }
+        return missingFiles;
+    }
+
+    public bool ValidateSoundFile(string soundFile) {
+        return File.Exists(soundFile);
+    }
+
+    public List<string> GetMissingFiles() {
+        return missingFiles;
+    }
+} 
+-------------------------------------------------------- 
+ 
+ 
+==================== Файл: E:\_dev\_tests\TwitchKarmikKoalaSoundComands\TwitchKarmikKoalaSoundComands\Services\MusicTrackerService.cs ==================== 
+ 
+﻿using System;
+using System.IO;
+using System.Net;
+using System.Text;
+using System.Text.Json;
+using System.Threading.Tasks;
+using System.Collections.Generic;
+
+public class MusicTrackerService {
+    private HttpListener listener;
+    private bool isRunning = false;
+    private MusicData currentTrack = new MusicData();
+    private readonly BotSettings settings;
+    private Task serverTask;
+
+    public MusicTrackerService(BotSettings settings) {
+        this.settings = settings;
+    }
+
+    public void Start() {
+        if (isRunning)
+            return;
+
+        try {
+            listener = new HttpListener();
+            listener.Prefixes.Add($"http://localhost:{settings.MusicTrackerPort}/");
+            listener.Start();
+
+            isRunning = true;
+            serverTask = Task.Run(StartListener);
+
+            WriteColor($"✅ Music Tracker запущен на порту {settings.MusicTrackerPort}\n", ConsoleColor.Green);
+        } catch (Exception ex) {
+            WriteColor($"❌ Ошибка запуска Music Tracker: {ex.Message}\n", ConsoleColor.Red);
+        }
+    }
+
+    public void Stop() {
+        if (!isRunning)
+            return;
+
+        isRunning = false;
+        try {
+            listener?.Stop();
+            listener?.Close();
+            serverTask?.Wait(1000);
+            WriteColor("✅ Music Tracker остановлен\n", ConsoleColor.Yellow);
+        } catch (Exception ex) {
+            WriteColor($"❌ Ошибка остановки Music Tracker: {ex.Message}\n", ConsoleColor.Red);
+        }
+    }
+
+    private async Task StartListener() {
+        while (isRunning) {
+            try {
+                var context = await listener.GetContextAsync();
+                _ = Task.Run(() => HandleRequest(context));
+            } catch (HttpListenerException) {
+                // Это нормально при остановке
+                break;
+            } catch (Exception ex) {
+                if (isRunning) // Только если мы еще не останавливаемся
+                {
+                    WriteColor($"❌ Ошибка Music Tracker: {ex.Message}\n", ConsoleColor.Red);
+                }
+                break;
+            }
+        }
+    }
+
+    private async void HandleRequest(HttpListenerContext context) {
+        var request = context.Request;
+        var response = context.Response;
+
+        try {
+            // Добавляем CORS заголовки
+            response.AddHeader("Access-Control-Allow-Origin", "*");
+            response.AddHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+            response.AddHeader("Access-Control-Allow-Headers", "Content-Type");
+
+            if (request.HttpMethod == "OPTIONS") {
+                response.StatusCode = 200;
+                response.Close();
+                if (settings.DebugMode) {
+                    WriteColor("🔧 Обработан OPTIONS запрос (CORS)\n", ConsoleColor.Cyan);
+                }
+                return;
+            }
+
+            if (request.HttpMethod == "POST" && request.Url.AbsolutePath == "/") {
+                if (settings.DebugMode) {
+                    WriteColor("📨 Получен POST запрос от Tampermonkey\n", ConsoleColor.Cyan);
+                }
+
+                using (var reader = new StreamReader(request.InputStream, request.ContentEncoding)) {
+                    var json = await reader.ReadToEndAsync();
+
+                    if (settings.DebugMode) {
+                        WriteColor($"📝 Данные: {json}\n", ConsoleColor.Gray);
+                    }
+
+                    if (!string.IsNullOrWhiteSpace(json)) {
+                        try {
+                            var options = new JsonSerializerOptions {
+                                PropertyNameCaseInsensitive = true
+                            };
+
+                            var musicData = JsonSerializer.Deserialize<MusicData>(json, options);
+
+                            if (musicData != null) {
+                                currentTrack = musicData;
+                                PrintTrackInfo(musicData);
+
+                                await SendResponse(response, 200, new { status = "success", message = "Track updated" });
+                            } else {
+                                await SendResponse(response, 400, new { status = "error", message = "Invalid data" });
+                            }
+                        } catch (JsonException jsonEx) {
+                            WriteColor($"❌ Ошибка парсинга JSON: {jsonEx.Message}\n", ConsoleColor.Red);
+                            await SendResponse(response, 400, new { status = "error", message = "Invalid JSON" });
+                        }
+                    } else {
+                        await SendResponse(response, 400, new { status = "error", message = "Empty data" });
+                    }
+                }
+            } else if (request.HttpMethod == "GET" && request.Url.AbsolutePath == "/") {
+                if (settings.DebugMode) {
+                    WriteColor("📥 Получен GET запрос\n", ConsoleColor.Cyan);
+                }
+
+                var options = new JsonSerializerOptions {
+                    WriteIndented = true,
+                    PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+                };
+                var json = JsonSerializer.Serialize(currentTrack, options);
+                await SendResponse(response, 200, json, "application/json");
+            } else {
+                response.StatusCode = 404;
+                response.Close();
+            }
+        } catch (Exception ex) {
+            WriteColor($"❌ Ошибка обработки запроса: {ex.Message}\n", ConsoleColor.Red);
+            response.StatusCode = 500;
+            response.Close();
+        }
+    }
+
+    private async Task SendResponse(HttpListenerResponse response, int statusCode, object data, string contentType = "application/json") {
+        try {
+            response.StatusCode = statusCode;
+            response.ContentType = contentType;
+
+            var json = JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true });
+            var buffer = Encoding.UTF8.GetBytes(json);
+
+            await response.OutputStream.WriteAsync(buffer, 0, buffer.Length);
+            response.Close();
+        } catch (Exception ex) {
+            WriteColor($"❌ Ошибка отправки ответа: {ex.Message}\n", ConsoleColor.Red);
+            response.Close();
+        }
+    }
+
+    public MusicData GetCurrentTrack() {
+        return currentTrack;
+    }
+
+    private void PrintTrackInfo(MusicData musicData) {
+        if (settings.DebugMode) {
+            Console.ForegroundColor = ConsoleColor.Green;
+            Console.WriteLine($"🌐 От скрипта:");
+            Console.ResetColor();
+
+            if (string.IsNullOrWhiteSpace(musicData.Name)) {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine("🎵 Трек: [НЕТ НАЗВАНИЯ]");
+                Console.ResetColor();
+            } else {
+                Console.WriteLine($"🎵 Трек: {musicData.Name}");
+            }
+
+            if (string.IsNullOrWhiteSpace(musicData.Link)) {
+                Console.ForegroundColor = ConsoleColor.Yellow;
+                Console.WriteLine("🔗 Ссылка: [НЕТ ССЫЛКИ]");
+                Console.ResetColor();
+            } else {
+                Console.WriteLine($"🔗 Ссылка: {musicData.Link}");
+            }
+
+            Console.ForegroundColor = ConsoleColor.DarkGray;
+            Console.WriteLine($"⏰ Время: {DateTime.Now:HH:mm:ss}");
+            Console.ResetColor();
+            Console.WriteLine(new string('-', 50));
+        }
+    }
+
+    private void WriteColor(string text, ConsoleColor color) {
+        var originalColor = Console.ForegroundColor;
+        Console.ForegroundColor = color;
+        Console.Write(text);
+        Console.ForegroundColor = originalColor;
+    }
+}
+
+public class MusicData {
+    public string Name { get; set; } = "";
+    public string Link { get; set; } = "";
+} 
+-------------------------------------------------------- 
+ 
+ 
+==================== Файл: E:\_dev\_tests\TwitchKarmikKoalaSoundComands\TwitchKarmikKoalaSoundComands\Services\StatisticsService.cs ==================== 
+ 
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+
+public class StatisticsService {
+    private CommandManager commandManager;
+
+    public StatisticsService(CommandManager commandManager) {
+        this.commandManager = commandManager;
+    }
+
+    public void ShowStatistics() {
+        Console.Clear();
+        WriteColor("=== СТАТИСТИКА КОМАНД ===\n", ConsoleColor.Cyan);
+        Console.WriteLine();
+
+        var commands = commandManager.GetAllCommands();
+        var usage = commandManager.GetCommandUsage();
+
+        WriteColor($"Всего команд: {commands.Count}\n", ConsoleColor.White);
+        WriteColor($"Для чата: {commandManager.ChatEnabledCount}\n", ConsoleColor.Green);
+        WriteColor($"Для наград: {commandManager.RewardEnabledCount}\n", ConsoleColor.Yellow);
+        WriteColor($"Всего использований: {commandManager.TotalUsage}\n", ConsoleColor.Cyan);
+        Console.WriteLine();
+
+        if (usage.Count == 0) {
+            WriteColor("Команды еще не использовались\n", ConsoleColor.Yellow);
+        } else {
+            WriteColor("Топ команд по использованию:\n", ConsoleColor.White);
+            foreach (var cmd in usage.OrderByDescending(x => x.Value).Take(10)) {
+                var command = commands[cmd.Key];
+                Console.Write($"{cmd.Key}: {cmd.Value} раз");
+                Console.Write($" [Чат: {(command.ChatEnabled ? "✓" : "✗")}]");
+                Console.Write($" [Награды: {(command.RewardEnabled ? "✓" : "✗")}]");
+                Console.WriteLine();
+            }
+        }
+
+        Console.WriteLine();
+        WriteColor("b - Назад\n", ConsoleColor.Gray);
+        Console.WriteLine();
+    }
+
+    private void WriteColor(string text, ConsoleColor color) {
+        var originalColor = Console.ForegroundColor;
+        Console.ForegroundColor = color;
+        Console.Write(text);
+        Console.ForegroundColor = originalColor;
+    }
+} 
+-------------------------------------------------------- 
+ 
+ 
+==================== Файл: E:\_dev\_tests\TwitchKarmikKoalaSoundComands\TwitchKarmikKoalaSoundComands\Services\TwitchBot.cs ==================== 
+ 
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
+public class TwitchBot {
+    private readonly SettingsManager settingsManager;
+    private readonly CommandManager commandManager;
+    private readonly TwitchConnectionManager connectionManager;
+    private readonly StatisticsService statisticsService;
+    private readonly AudioPlayer audioPlayer;
+    private readonly FileManager fileManager;
+
+    private RewardManager rewardManager;
+    private Dictionary<string, string> rewardIdToCommandMap;
+    private string lastAuthError = "";
+    private string lastRewardsError = "";
+    private string lastChatError = "";
+
+    private VipManager vipManager;
+
+    private readonly MusicTrackerService musicTracker;
+    private readonly List<string> musicKeywords;
+
+    private StatisticsDisplay statisticsDisplay;
+
+    public TwitchBot() {
+        settingsManager = new SettingsManager();
+        commandManager = new CommandManager(settingsManager.Settings);
+        connectionManager = new TwitchConnectionManager(settingsManager.Settings);
+        statisticsService = new StatisticsService(commandManager);
+        audioPlayer = new AudioPlayer(settingsManager.Settings);
+        fileManager = new FileManager(settingsManager.Settings.SoundsDirectory);
+
+        rewardIdToCommandMap = new Dictionary<string, string>();
+
+        // Подписка на события
+        connectionManager.OnChatCommand += HandleChatCommand;
+        connectionManager.OnRewardRedeemed += HandleRewardCommand;
+        connectionManager.OnRewardMappingUpdated += HandleRewardMapping;
+
+        vipManager = null;
+        statisticsDisplay = null;
+
+        musicTracker = new MusicTrackerService(settingsManager.Settings);
+        musicKeywords = new List<string>();
+        LoadMusicKeywords();
+
+    }
+
+    private void InitializeApi() {
+        if (connectionManager?.Api != null) {
+            connectionManager.Api.Settings.ClientId = settingsManager.Settings.ClientId;
+
+            string apiToken = settingsManager.Settings.OAuthToken;
+            if (apiToken.StartsWith("oauth:")) {
+                apiToken = apiToken.Substring(6);
+            }
+            connectionManager.Api.Settings.AccessToken = apiToken;
+        }
+    }
+
+
+    public async Task<(bool authOk, string authError, bool rewardsOk, string rewardsError, bool chatOk, string chatError)> Connect() {
+        var result = await connectionManager.Connect();
+
+        InitializeApi();
+
+        // Инициализируем RewardManager после получения api и channelId
+        if (rewardManager == null) {
+            rewardManager = new RewardManager(connectionManager.Api, connectionManager.ChannelId, settingsManager.Settings);
+        }
+
+        if (vipManager == null) {
+            vipManager = new VipManager(connectionManager.Api, connectionManager.ChannelId, settingsManager.Settings);
+        }
+
+        if (statisticsDisplay == null) {
+            statisticsDisplay = new StatisticsDisplay(this, vipManager, commandManager, settingsManager.Settings);
+        }
+
+        statisticsDisplay.Start();
+
+        if (settingsManager.Settings.MusicTrackerEnabled) {
+            musicTracker.Start();
+        }
+
+        try {
+            // Проверяем валидность токена
+            var cleanToken = settingsManager.Settings.OAuthToken.Replace("oauth:", "");
+            var validation = await connectionManager.Api.Auth.ValidateAccessTokenAsync(cleanToken);
+
+            if (validation == null) {
+                WriteColor("❌ Токен невалиден\n", ConsoleColor.Red);
+                return result;
+            }
+
+            WriteColor($"✅ Токен валиден для пользователя: {validation.UserId}\n", ConsoleColor.Green);
+        } catch (Exception ex) {
+            WriteColor($"❌ Ошибка проверки токена: {ex.Message}\n", ConsoleColor.Red);
+            return result;
+        }
+
+        if (settingsManager.Settings.RewardsEnabled && result.rewardsOk) {
+            try {
+                var rewardTitleToIdMap = await rewardManager.CreateCustomRewards(commandManager.GetAllCommands());
+
+                // Строим mapping ID наград к командам
+                foreach (var command in commandManager.GetAllCommands()) {
+                    if (command.Value.RewardEnabled && rewardTitleToIdMap.ContainsKey(command.Value.RewardTitle)) {
+                        var rewardId = rewardTitleToIdMap[command.Value.RewardTitle];
+                        connectionManager.AddRewardMapping(rewardId, command.Key);
+                        rewardIdToCommandMap[rewardId] = command.Key;
+
+                        if (settingsManager.Settings.DebugMode) {
+                            WriteColor($"✅ Сопоставлено: {command.Value.RewardTitle} -> {command.Key}\n", ConsoleColor.Green);
+                        }
+                    }
+                }
+
+                if (rewardTitleToIdMap.Count > 0) {
+                    result.rewardsOk = true;
+                    WriteColor($"✅ Награды настроены: {rewardTitleToIdMap.Count} наград\n", ConsoleColor.Green);
+                } else {
+                    result.rewardsOk = false;
+                    lastRewardsError = "Не удалось создать или найти награды";
+                }
+            } catch (Exception ex) {
+                lastRewardsError = $"Ошибка создания наград: {ex.Message}";
+                result.rewardsOk = false;
+            }
+        }
+
+        if (settingsManager.Settings.EnableVipReward || settingsManager.Settings.EnableVipStealReward) {
+            WriteDebug($"🔍 Проверка доступности API: ChannelId={connectionManager.ChannelId}\n", ConsoleColor.Cyan);
+
+            try {
+                // Проверяем, что можем получить список наград
+                var testRewards = await connectionManager.Api.Helix.ChannelPoints.GetCustomRewardAsync(
+                    connectionManager.ChannelId, onlyManageableRewards: true);
+                WriteDebug($"✅ API доступно, найдено наград: {testRewards.Data.Length}\n", ConsoleColor.Green);
+            } catch (Exception ex) {
+                WriteColor($"❌ Ошибка доступа к API наград: {ex.Message}\n", ConsoleColor.Red);
+            }
+        }
+
+        if (settingsManager.Settings.EnableVipReward || settingsManager.Settings.EnableVipStealReward) {
+            try {
+                bool vipRewardsCreated = await vipManager.CreateVipRewards();
+
+                if (vipRewardsCreated) {
+                    WriteColor($"✅ VIP награды настроены успешно\n", ConsoleColor.Green);
+                } else {
+                    WriteColor($"❌ Ошибка создания VIP наград: {vipManager.LastError}\n", ConsoleColor.Red);
+                }
+            } catch (Exception ex) {
+                WriteColor($"❌ Ошибка создания VIP наград: {ex.Message}\n", ConsoleColor.Red);
+            }
+        }
+
+        fileManager.CheckSoundFiles(commandManager.GetAllCommands());
+
+        statisticsDisplay.Start();
+
+        return result;
+    }
+
+    public async Task ForceResyncVip() {
+        if (vipManager != null) {
+            WriteColor($"🔄 Принудительная синхронизация VIP списка...\n", ConsoleColor.Cyan);
+            await vipManager.SyncWithRealVipList();
+            WriteColor("✅ Синхронизация завершена\n", ConsoleColor.Green);
+            WriteColor("Нажмите любую клавишу чтобы продолжить...\n", ConsoleColor.Yellow);
+            Console.ReadKey();
+        } else {
+            WriteColor("❌ VipManager не инициализирован\n", ConsoleColor.Red);
+            WriteColor("Нажмите любую клавишу чтобы продолжить...\n", ConsoleColor.Yellow);
+            Console.ReadKey();
+        }
+    }
+
+    private void LoadMusicKeywords() {
+        musicKeywords.Clear();
+        var keywords = settingsManager.Settings.MusicCommandKeywords
+            .Split(new[] { ';', ',', ' ' }, StringSplitOptions.RemoveEmptyEntries);
+
+        foreach (var keyword in keywords) {
+            var trimmedKeyword = keyword.Trim().ToLower();
+            if (!string.IsNullOrEmpty(trimmedKeyword)) {
+                musicKeywords.Add(trimmedKeyword);
+            }
+        }
+
+        if (settingsManager.Settings.DebugMode) {
+            WriteColor($"🎵 Загружено музыкальных ключевых слов: {musicKeywords.Count}\n", ConsoleColor.Cyan);
+        }
+    }
+
+    private async void HandleChatCommand(object? sender, (string username, string message) args) {
+        if (!settingsManager.Settings.ChatEnabled)
+            return;
+
+        var message = args.message.ToLower();
+        var username = args.username;
+
+        // Проверяем музыкальные команды
+        if (musicKeywords.Contains(message)) {
+            await HandleMusicCommand(username);
+            return;
+        }
+
+        if (commandManager.ProcessChatCommand(message, username)) {
+            var command = commandManager.GetCommand(message);
+            if (command != null) {
+                if (settingsManager.Settings.DebugMode) {
+                    WriteColor($"🔊 Активирована команда чата: {message} пользователем {username}\n", ConsoleColor.Cyan);
+                }
+
+                // Записываем статистику
+                statisticsDisplay.RecordSoundActivation(username, message, 0); // Для чата стоимость 0
+
+                audioPlayer.PlaySound(command.SoundFile, username, message);
+
+                // Обновляем отображение статистики
+                UpdateStatisticsDisplay();
+            }
+        }
+    }
+
+    private async Task HandleMusicCommand(string username) {
+        try {
+            var currentTrack = musicTracker.GetCurrentTrack();
+            string response;
+
+            if (currentTrack != null && !string.IsNullOrEmpty(currentTrack.Name)) {
+                response = settingsManager.Settings.MusicResponseTemplate
+                    .Replace("$name", username)
+                    .Replace("$trackName", currentTrack.Name)
+                    .Replace("$trackLink", string.IsNullOrEmpty(currentTrack.Link) ? "" : currentTrack.Link);
+            } else {
+                response = settingsManager.Settings.NoMusicResponseTemplate
+                    .Replace("$name", username);
+            }
+
+            connectionManager.SendMessage(response);
+
+            if (settingsManager.Settings.DebugMode) {
+                WriteColor($"🎵 Обработана музыкальная команда для {username}: {response}\n", ConsoleColor.Cyan);
+            }
+        } catch (Exception ex) {
+            if (settingsManager.Settings.DebugMode) {
+                WriteColor($"❌ Ошибка обработки музыкальной команды: {ex.Message}\n", ConsoleColor.Red);
+            }
+        }
+
+        await Task.CompletedTask;
+    }
+
+    private async void HandleRewardCommand(object? sender, (string command, string username) args) {
+        if (!settingsManager.Settings.RewardsEnabled)
+            return;
+
+        // Обработка VIP наград по названию команды
+        if (args.command == "VIP_PURCHASE" || args.command.Contains("Купить VIP")) {
+            HandleVipPurchase(args.username);
+            return;
+        } else if (args.command == "VIP_STEAL" || args.command.Contains("Украсть VIP")) {
+            HandleVipSteal(args.username);
+            return;
+        }
+
+        // Обработка обычных звуковых команд
+        if (commandManager.ProcessRewardCommand(args.command, args.username)) {
+            var soundCommand = commandManager.GetCommand(args.command);
+            if (soundCommand != null) {
+                if (settingsManager.Settings.DebugMode) {
+                    WriteColor($"🎁 Активирована награда: {args.command} пользователем {args.username}\n", ConsoleColor.Magenta);
+                }
+
+                // Записываем статистику с стоимостью
+                statisticsDisplay.RecordSoundActivation(args.username, args.command, soundCommand.Cost);
+
+                audioPlayer.PlaySound(soundCommand.SoundFile, args.username, args.command);
+
+                // Обновляем отображение статистики
+                UpdateStatisticsDisplay();
+            }
+        } else {
+            if (settingsManager.Settings.DebugMode) {
+                WriteColor($"⏳ Cooldown для команды {args.command} пользователя {args.username}\n", ConsoleColor.Yellow);
+            }
+        }
+
+        await Task.CompletedTask;
+    }
+
+    private async void HandleVipPurchase(string username) {
+        if (await vipManager.PurchaseVip(username)) {
+            // Записываем статистику
+            statisticsDisplay.RecordVipPurchase(username);
+
+            // Отправляем сообщение в чат
+            connectionManager.SendMessage($"🎉 Поздравляем, {username}! Вы стали VIP на {settingsManager.Settings.VipDurationDays} дней!");
+
+            // Обновляем отображение статистики
+            UpdateStatisticsDisplay();
+        } else {
+            connectionManager.SendMessage($"❌ {username}, невозможно выдать VIP. Возможно, нет свободных слотов или вы уже VIP.");
+        }
+    }
+
+    private async void HandleVipSteal(string thiefName) {
+        var result = vipManager.StealVip(thiefName);
+
+        if (result.success) {
+            // Записываем статистику успешной кражи
+            statisticsDisplay.RecordStealAttempt(thiefName, true, result.stolenFrom);
+
+            string message = vipManager.GetRandomSuccessfulStealMessage(thiefName, result.stolenFrom);
+            connectionManager.SendMessage(message);
+
+            // Обновляем отображение статистики
+            UpdateStatisticsDisplay();
+        } else {
+            // Записываем статистику неудачной кражи
+            statisticsDisplay.RecordStealAttempt(thiefName, false);
+
+            string message = vipManager.GetRandomFailedStealMessage(thiefName);
+            connectionManager.SendMessage(message);
+
+            // Бан на указанное время
+            await connectionManager.BanUser(thiefName, settingsManager.Settings.VipStealBanTime);
+
+            // Обновляем отображение статистики
+            UpdateStatisticsDisplay();
+        }
+    }
+
+    private void HandleRewardMapping(object sender, (string rewardId, string rewardTitle) args) {
+        // Ищем команду по названию награды
+        var command = commandManager.GetAllCommands()
+            .FirstOrDefault(c => c.Value.RewardTitle == args.rewardTitle && c.Value.RewardEnabled);
+
+        if (command.Key != null) {
+            connectionManager.AddRewardMapping(args.rewardId, command.Key);
+            rewardIdToCommandMap[args.rewardId] = command.Key;
+
+            if (settingsManager.Settings.DebugMode) {
+                WriteColor($"🔍 Сопоставлена награда по названию: '{args.rewardTitle}' -> '{command.Key}'\n", ConsoleColor.Green);
+            }
+        } else {
+            if (settingsManager.Settings.DebugMode) {
+                WriteColor($"❌ Не найдена команда для награды: {args.rewardTitle}\n", ConsoleColor.Red);
+            }
+        }
+    }
+
+    private void UpdateStatisticsDisplay() {
+        // Этот метод будет вызывать обновление интерфейса
+        // В реальной реализации нужно обновить консоль
+        if (Program.IsInterfaceActive) {
+            Program.RequestInterfaceUpdate();
+        }
+    }
+
+    public BotSettings GetCurrentSettings() {
+        return settingsManager.Settings;
+    }
+
+    // Публичные методы для UI (остаются без изменений)
+    public string GetChannelName() => settingsManager.Settings.ChannelName;
+    public int GetTotalCommands() => commandManager.GetAllCommands().Count;
+    public int GetTotalUsage() => commandManager.TotalUsage;
+    public Dictionary<string, int> GetCommandUsage() => commandManager.GetCommandUsage();
+    public List<string> GetMissingFiles() => fileManager.GetMissingFiles();
+    public string GetLastAuthError() => lastAuthError;
+    public string GetLastRewardsError() => lastRewardsError;
+    public string GetLastChatError() => lastChatError;
+    public bool ChatEnabled => settingsManager.Settings.ChatEnabled;
+    public bool RewardsEnabled => settingsManager.Settings.RewardsEnabled;
+    public int GetChatEnabledCount() => commandManager.ChatEnabledCount;
+    public int GetRewardEnabledCount() => commandManager.RewardEnabledCount;
+    public bool IsDebugMode => settingsManager.Settings.DebugMode;
+    public int GetVolume => settingsManager.Settings.Volume;
+    public bool VipRewardEnabled => settingsManager.Settings.EnableVipReward;
+    public bool VipStealEnabled => settingsManager.Settings.EnableVipStealReward;
+
+    public void ToggleChat() {
+        settingsManager.Settings.ChatEnabled = !settingsManager.Settings.ChatEnabled;
+        settingsManager.SaveSettings();
+        WriteColor($"Команды чата: {(settingsManager.Settings.ChatEnabled ? "ВКЛ" : "ВЫКЛ")}\n",
+                   settingsManager.Settings.ChatEnabled ? ConsoleColor.Green : ConsoleColor.Red);
+    }
+
+    public void ToggleRewards() {
+        settingsManager.Settings.RewardsEnabled = !settingsManager.Settings.RewardsEnabled;
+        settingsManager.SaveSettings();
+        WriteColor($"Награды: {(settingsManager.Settings.RewardsEnabled ? "ВКЛ" : "ВЫКЛ")}\n",
+                   settingsManager.Settings.RewardsEnabled ? ConsoleColor.Green : ConsoleColor.Red);
+    }
+
+    public void ToggleDebugMode() {
+        settingsManager.Settings.DebugMode = !settingsManager.Settings.DebugMode;
+        settingsManager.SaveSettings();
+        WriteColor($"Режим отладки: {(settingsManager.Settings.DebugMode ? "ВКЛ" : "ВЫКЛ")}\n",
+                   settingsManager.Settings.DebugMode ? ConsoleColor.Green : ConsoleColor.Red);
+    }
+
+    public void ToggleVipReward() {
+        settingsManager.Settings.EnableVipReward = !settingsManager.Settings.EnableVipReward;
+        settingsManager.SaveSettings();
+        WriteColor($"Покупка VIP: {(settingsManager.Settings.EnableVipReward ? "ВКЛ" : "ВЫКЛ")}\n",
+                   settingsManager.Settings.EnableVipReward ? ConsoleColor.Green : ConsoleColor.Red);
+    }
+
+    public void ToggleVipStealReward() {
+        settingsManager.Settings.EnableVipStealReward = !settingsManager.Settings.EnableVipStealReward;
+        settingsManager.SaveSettings();
+        WriteColor($"Воровство VIP: {(settingsManager.Settings.EnableVipStealReward ? "ВКЛ" : "ВЫКЛ")}\n",
+                   settingsManager.Settings.EnableVipStealReward ? ConsoleColor.Green : ConsoleColor.Red);
+    }
+
+    public void ChangeVolume() {
+        settingsManager.Settings.Volume += 10;
+        if (settingsManager.Settings.Volume > 100) {
+            settingsManager.Settings.Volume = 0;
+        }
+        settingsManager.SaveSettings();
+        WriteColor($"Громкость установлена: {settingsManager.Settings.Volume}%\n", ConsoleColor.Cyan);
+    }
+
+    public void ShowStatistics() => statisticsService.ShowStatistics();
+
+    public void ShowPreferences() {
+        Console.Clear();
+        WriteColor("=== НАСТРОЙКИ ===\n", ConsoleColor.Cyan);
+        Console.WriteLine();
+
+        Console.Write("1 - Команды в чате: ");
+        WriteColor(settingsManager.Settings.ChatEnabled ? "ВКЛ" : "ВЫКЛ",
+                   settingsManager.Settings.ChatEnabled ? ConsoleColor.Green : ConsoleColor.Red);
+        Console.WriteLine();
+
+        Console.Write("2 - Награды Channel Points: ");
+        WriteColor(settingsManager.Settings.RewardsEnabled ? "ВКЛ" : "ВЫКЛ",
+                   settingsManager.Settings.RewardsEnabled ? ConsoleColor.Green : ConsoleColor.Red);
+        Console.WriteLine();
+
+        Console.Write("3 - Покупка VIP: ");
+        WriteColor(settingsManager.Settings.EnableVipReward ? "ВКЛ" : "ВЫКЛ",
+                   settingsManager.Settings.EnableVipReward ? ConsoleColor.Green : ConsoleColor.Red);
+        Console.WriteLine();
+
+        Console.Write("4 - Воровство VIP: ");
+        WriteColor(settingsManager.Settings.EnableVipStealReward ? "ВКЛ" : "ВЫКЛ",
+                   settingsManager.Settings.EnableVipStealReward ? ConsoleColor.Green : ConsoleColor.Red);
+        Console.WriteLine();
+
+        WriteColor("5 - Удалить всех VIP (требует подтверждения)\n", ConsoleColor.Red);
+        Console.WriteLine();
+
+        Console.Write("t - Режим отладки: ");
+        WriteColor(settingsManager.Settings.DebugMode ? "ВКЛ" : "ВЫКЛ",
+                   settingsManager.Settings.DebugMode ? ConsoleColor.Green : ConsoleColor.Red);
+        Console.WriteLine();
+
+        Console.Write("v - Громкость: ");
+        WriteColor($"{settingsManager.Settings.Volume}%\n", ConsoleColor.Cyan);
+
+        Console.WriteLine();
+        WriteColor("a - Открыть ссылку авторизации в браузере\n", ConsoleColor.Blue);
+        Console.WriteLine();
+        WriteColor("b - Назад\n", ConsoleColor.Gray);
+        Console.WriteLine();
+    }
+
+    public async Task<bool> RemoveAllVips(bool confirm) {
+        if (vipManager != null) {
+            return await vipManager.RemoveAllVips(confirm);
+        }
+        return false;
+    }
+
+    public async Task Disconnect(bool disableRewards = true) {
+
+        statisticsDisplay.Stop();
+
+        if (disableRewards) {
+            if (settingsManager.Settings.EnableVipReward || settingsManager.Settings.EnableVipStealReward) {
+                await vipManager.DisableVipRewards();
+            }
+
+            if (rewardManager != null) {
+                await rewardManager.DisableCustomRewards();
+            }
+        }
+
+        musicTracker.Stop();
+
+        await connectionManager.Disconnect(false);
+    }
+
+    public string GetAuthUrl() {
+        // Обновленные scopes с правами для VIP
+        var scopes = "channel:manage:redemptions " +
+                     "chat:edit " +
+                     "chat:read " +
+                     "moderator:manage:banned_users " +
+                     "channel:read:redemptions " +
+                     "channel:manage:vips " +
+                     "channel:read:vips " +  // Чтение списка VIP
+                     "moderator:read:followers";  // Дополнительные права
+
+        var encodedScopes = Uri.EscapeDataString(scopes);
+        return $"https://id.twitch.tv/oauth2/authorize?client_id={settingsManager.Settings.ClientId}&redirect_uri=http://localhost&response_type=token&scope={encodedScopes}";
+    }
+
+    public async Task CheckTokenScopes() {
+        try {
+            var cleanToken = settingsManager.Settings.OAuthToken.Replace("oauth:", "");
+            var validated = await connectionManager.Api.Auth.ValidateAccessTokenAsync(cleanToken);
+
+            if (validated != null) {
+                WriteColor($"Токен действителен для пользователя: {validated.UserId}\n", ConsoleColor.Green);
+                WriteColor($"Scopes токена: {string.Join(", ", validated.Scopes)}\n", ConsoleColor.Yellow);
+
+                // Проверяем все необходимые scope
+                var requiredScopes = new[] {
+                "channel:manage:redemptions",
+                "moderator:manage:banned_users",
+                "channel:read:redemptions",
+                "channel:manage:vips"
+            };
+
+                var missingScopes = requiredScopes.Where(scope => !validated.Scopes.Contains(scope)).ToList();
+
+                if (missingScopes.Any()) {
+                    WriteColor($"Не хватает scopes: {string.Join(", ", missingScopes)}\n", ConsoleColor.Red);
+
+                    if (missingScopes.Contains("moderator:manage:banned_users")) {
+                        WriteColor("⚠️  Отсутствует scope для бана пользователей. Кража VIP не будет работать!\n", ConsoleColor.Red);
+                    }
+                    if (missingScopes.Contains("channel:manage:redemptions")) {
+                        WriteColor("⚠️  Отсутствует scope для управления наградами. Награды не будут работать!\n", ConsoleColor.Red);
+                    }
+                    if (missingScopes.Contains("channel:read:redemptions")) {
+                        WriteColor("⚠️  Отсутствует scope для чтения наград. Награды могут работать некорректно!\n", ConsoleColor.Red);
+                    }
+                    if (missingScopes.Contains("channel:manage:vips")) {
+                        WriteColor("⚠️  Отсутствует scope для управления VIP. Функции VIP не будут работать!\n", ConsoleColor.Red);
+                    }
+                } else {
+                    WriteColor("✅ Все необходимые scopes присутствуют\n", ConsoleColor.Green);
+                }
+            }
+        } catch (Exception ex) {
+            WriteColor($"❌ Ошибка проверки токена: {ex.Message}\n", ConsoleColor.Red);
+        }
+    }
+
+    public void DisplayLiveStatistics(int _left, int _top) {
+        statisticsDisplay?.DisplayStatistics(_left, _top);
+    }
+
+    public void StopStatistics() {
+        statisticsDisplay?.Stop();
+    }
+
+    private void WriteDebug(string text, ConsoleColor color) {
+        if (true) {
+            WriteColor(text, color);
+        }
+    }
+    private void WriteColor(string text, ConsoleColor color) {
+        var originalColor = Console.ForegroundColor;
+        Console.ForegroundColor = color;
+        foreach (var ch in text) {
+            try {
+                Console.Write(ch);
+            } catch {
+                Console.Write('?');
+            }
+        }
+        Console.ForegroundColor = originalColor;
+    }
+} 
+-------------------------------------------------------- 
+ 
+ 
+==================== Файл: E:\_dev\_tests\TwitchKarmikKoalaSoundComands\TwitchKarmikKoalaSoundComands\Twitch\RewardManager.cs ==================== 
+ 
+﻿using TwitchLib.Api;
+using TwitchLib.Api.Helix.Models.ChannelPoints;
+using TwitchLib.Api.Helix.Models.ChannelPoints.CreateCustomReward;
+using TwitchLib.Api.Helix.Models.ChannelPoints.UpdateCustomReward;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading.Tasks;
+
+public class RewardManager {
+    private TwitchAPI api;
+    private string channelId;
+    private BotSettings settings;
+    private List<string> createdRewardIds = new List<string>();
+    private Dictionary<string, string> rewardTitleToIdMap = new Dictionary<string, string>();
+
+    public string LastError { get; private set; } = "";
+
+    public RewardManager(TwitchAPI api, string channelId, BotSettings settings) {
+        this.api = api;
+        this.channelId = channelId;
+        this.settings = settings;
+    }
+
+    public async Task<Dictionary<string, string>> CreateCustomRewards(Dictionary<string, SoundCommand> soundCommands) {
+        try {
+            WriteDebug($"=== СОЗДАНИЕ НАГРАД ===\n", ConsoleColor.Cyan);
+            rewardTitleToIdMap.Clear();
+            createdRewardIds.Clear();
+
+            var existingRewardsResponse = await api.Helix.ChannelPoints.GetCustomRewardAsync(channelId, new List<string>(), true);
+
+            if (existingRewardsResponse == null || existingRewardsResponse.Data == null) {
+                LastError = "Не удалось получить список существующих наград";
+                return rewardTitleToIdMap;
+            }
+
+            var existingRewards = existingRewardsResponse.Data;
+            WriteDebug($"✅ Найдено существующих наград: {existingRewards.Length}\n", ConsoleColor.Green);
+
+            int createdCount = 0;
+            int updatedCount = 0;
+            int skippedCount = 0;
+
+            var rewardCommands = soundCommands.Values.Where(c => c.RewardEnabled).ToList();
+            WriteColor($"Обрабатываем {rewardCommands.Count} команд с наградами...\n", ConsoleColor.White);
+
+            foreach (var soundCommand in rewardCommands) {
+                var rewardTitle = soundCommand.RewardTitle;
+                WriteDebug($"Обрабатываем: '{rewardTitle}'\n", ConsoleColor.Cyan);
+
+                var existingReward = existingRewards.FirstOrDefault(r =>
+                    r.Title.ToLower() == rewardTitle.ToLower());
+
+                if (existingReward != null) {
+                    bool needsUpdate = false;
+                    string updateReason = "";
+
+                    if (existingReward.Cost != soundCommand.Cost) {
+                        needsUpdate = true;
+                        updateReason += $"стоимость ({existingReward.Cost} -> {soundCommand.Cost}) ";
+                    }
+
+                    var expectedCooldown = ConvertCooldownToMinutes(soundCommand.Cooldown);
+                    var currentCooldown = existingReward.GlobalCooldownSetting?.GlobalCooldownSeconds ?? 0;
+                    var isCooldownEnabled = existingReward.GlobalCooldownSetting?.IsEnabled ?? false;
+
+                    if (currentCooldown != expectedCooldown || !isCooldownEnabled) {
+                        needsUpdate = true;
+                        updateReason += $"cooldown ({currentCooldown} -> {expectedCooldown}) ";
+                    }
+
+                    if (existingReward.IsEnabled != true) {
+                        needsUpdate = true;
+                        updateReason += "включение ";
+                    }
+
+                    if (needsUpdate) {
+                        WriteDebug($"  ✅ Награда существует, обновляю... ({updateReason})\n", ConsoleColor.Green);
+
+                        try {
+                            var updateRequest = new UpdateCustomRewardRequest {
+                                Cost = soundCommand.Cost,
+                                IsEnabled = true,
+                                GlobalCooldownSeconds = expectedCooldown,
+                                IsGlobalCooldownEnabled = true
+                            };
+
+                            var updatedReward = await api.Helix.ChannelPoints.UpdateCustomRewardAsync(
+                                channelId, existingReward.Id, updateRequest);
+
+                            if (updatedReward != null) {
+                                createdRewardIds.Add(existingReward.Id);
+                                rewardTitleToIdMap[rewardTitle] = existingReward.Id;
+                                updatedCount++;
+                                WriteColor($"  ✅ Награда '{rewardTitle}' обновлена\n", ConsoleColor.Green);
+                            }
+                        } catch (Exception ex) {
+                            WriteColor($"  ❌ Ошибка обновления награды '{rewardTitle}': {ex.Message}\n", ConsoleColor.Red);
+                        }
+                    } else {
+                        createdRewardIds.Add(existingReward.Id);
+                        rewardTitleToIdMap[rewardTitle] = existingReward.Id;
+                        skippedCount++;
+                        WriteDebug($"  ✅ Награда '{rewardTitle}' уже актуальна\n", ConsoleColor.Green);
+                    }
+                } else {
+                    WriteDebug($"  ➕ Создаю новую награду...\n", ConsoleColor.Yellow);
+
+                    try {
+                        var request = new CreateCustomRewardsRequest {
+                            Title = rewardTitle,
+                            Cost = soundCommand.Cost,
+                            IsEnabled = true,
+                            BackgroundColor = "#00FF00",
+                            IsUserInputRequired = false,
+                            ShouldRedemptionsSkipRequestQueue = false,
+                            GlobalCooldownSeconds = ConvertCooldownToMinutes(soundCommand.Cooldown),
+                            IsGlobalCooldownEnabled = true
+                        };
+
+                        var result = await api.Helix.ChannelPoints.CreateCustomRewardsAsync(channelId, request);
+
+                        if (result != null && result.Data.Length > 0) {
+                            createdRewardIds.Add(result.Data[0].Id);
+                            rewardTitleToIdMap[rewardTitle] = result.Data[0].Id;
+                            createdCount++;
+                            WriteColor($"  ✅ Награда '{rewardTitle}' создана\n", ConsoleColor.Green);
+                        }
+                    } catch (Exception ex) {
+                        WriteColor($"  ❌ Ошибка создания награды '{rewardTitle}': {ex.Message}\n", ConsoleColor.Red);
+                    }
+                }
+
+                await Task.Delay(500);
+            }
+
+            WriteDebug($"\n=== РЕЗУЛЬТАТ ===\n", ConsoleColor.Cyan);
+            WriteDebug($"Создано новых: {createdCount}\n", ConsoleColor.Green);
+            WriteDebug($"Обновлено: {updatedCount}\n", ConsoleColor.Yellow);
+            WriteDebug($"Пропущено (актуальных): {skippedCount}\n", ConsoleColor.Blue);
+            WriteDebug($"Всего обработано: {rewardCommands.Count}\n", ConsoleColor.White);
+
+            return rewardTitleToIdMap;
+        } catch (Exception ex) {
+            LastError = $"Критическая ошибка: {ex.Message}";
+            WriteDebug($"❌ Ошибка в CreateCustomRewards: {ex.Message}\n", ConsoleColor.Red);
+            return new Dictionary<string, string>();
+        }
+    }
+
+    public string GetRewardIdByTitle(string rewardTitle) {
+        return rewardTitleToIdMap.ContainsKey(rewardTitle) ? rewardTitleToIdMap[rewardTitle] : null;
+    }
+
+    public async Task DisableCustomRewards() {
+        if (createdRewardIds.Count == 0)
+            return;
+
+        try {
+            var currentRewards = await api.Helix.ChannelPoints.GetCustomRewardAsync(channelId, createdRewardIds);
+
+            foreach (var reward in currentRewards.Data) {
+                try {
+                    var updateRequest = new UpdateCustomRewardRequest { IsEnabled = false };
+                    await api.Helix.ChannelPoints.UpdateCustomRewardAsync(channelId, reward.Id, updateRequest);
+                    WriteDebug($"Награда '{reward.Title}' отключена\n", ConsoleColor.Yellow);
+                    await Task.Delay(200);
+                } catch (Exception ex) {
+                    WriteDebug($"Ошибка отключения награды '{reward.Title}': {ex.Message}\n", ConsoleColor.Red);
+                }
+            }
+        } catch (Exception ex) {
+            WriteDebug($"Ошибка при отключении наград: {ex.Message}\n", ConsoleColor.Red);
+        }
+    }
+
+    private int ConvertCooldownToMinutes(int cooldownSeconds) {
+        int minutes = cooldownSeconds / 60;
+        return Math.Clamp(minutes, 1, 180) * 60;
+    }
+
+    private void WriteDebug(string text, ConsoleColor color) {
+        if (settings.DebugMode) {
+            WriteColor(text, color);
+        }
+    }
+
+    private void WriteColor(string text, ConsoleColor color) {
+        var originalColor = Console.ForegroundColor;
+        Console.ForegroundColor = color;
+        Console.Write(text);
+        Console.ForegroundColor = originalColor;
+    }
+} 
+-------------------------------------------------------- 
+ 
+ 
+==================== Файл: E:\_dev\_tests\TwitchKarmikKoalaSoundComands\TwitchKarmikKoalaSoundComands\Twitch\TwitchConnectionManager.cs ==================== 
+ 
+﻿using TwitchLib.Api;
+using TwitchLib.Client;
+using TwitchLib.Client.Events;
+using TwitchLib.Client.Models;
+using TwitchLib.Communication.Clients;
+using TwitchLib.Communication.Models;
+using TwitchLib.PubSub;
+using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+
+public class TwitchConnectionManager {
+    private TwitchClient? client;
+    private TwitchAPI api = new TwitchAPI();
+    private TwitchPubSub? pubSub;
+    private BotSettings settings;
+    private string? channelId;
+    private string? botId;
+
+    public event EventHandler<(string username, string message)> OnChatCommand = delegate { };
+    public event EventHandler<(string command, string username)> OnRewardRedeemed = delegate { };
+    public event EventHandler<(string rewardId, string rewardTitle)> OnRewardMappingUpdated = delegate { };
+
+    private Dictionary<string, string> rewardIdToCommandMap;
+    private List<string> createdRewardIds = new List<string>();
+
+    // Добавляем свойства для доступа к приватным полям
+    public TwitchAPI Api => api;
+    public string ChannelId => channelId;
+
+    public TwitchConnectionManager(BotSettings settings) {
+        this.settings = settings;
+        rewardIdToCommandMap = new Dictionary<string, string>();
+    }
+
+    public async Task ReinitializeApi() {
+        if (api != null) {
+            api.Settings.ClientId = settings.ClientId;
+
+            string apiToken = settings.OAuthToken;
+            if (apiToken.StartsWith("oauth:")) {
+                apiToken = apiToken.Substring(6);
+            }
+            api.Settings.AccessToken = apiToken;
+        }
+
+        await Task.CompletedTask;
+    }
+
+    public void SendMessage(string message) {
+        if (client != null && client.IsConnected) {
+            client.SendMessage(settings.ChannelName, message);
+        }
+    }
+
+    public async Task BanUser(string username, int durationMinutes) {
+        try {
+            // Получаем ID пользователя
+            var users = await api.Helix.Users.GetUsersAsync(logins: new List<string> { username });
+            if (users.Users.Length == 0) {
+                WriteDebug($"❌ Пользователь {username} не найден\n", ConsoleColor.Red);
+                return;
+            }
+
+            var userId = users.Users[0].Id;
+
+            // Используем broadcasterId как moderatorId, так как это один и тот же аккаунт
+            var banRequest = new TwitchLib.Api.Helix.Models.Moderation.BanUser.BanUserRequest {
+                UserId = userId,
+                Duration = durationMinutes * 60,
+                Reason = "Неудачная попытка кражи VIP"
+            };
+
+            await api.Helix.Moderation.BanUserAsync(
+                broadcasterId: channelId,
+                moderatorId: channelId, // используем channelId как moderatorId
+                banUserRequest: banRequest
+            );
+
+            if (settings.DebugMode) {
+                WriteDebug($"🔨 Пользователь {username} забанен на {durationMinutes} минут\n", ConsoleColor.Red);
+            }
+        } catch (Exception ex) {
+            WriteDebug($"❌ Ошибка бана пользователя {username}: {ex.Message}\n", ConsoleColor.Red);
+        }
+    }
+
+    public async Task<(bool authOk, string authError, bool rewardsOk, string rewardsError, bool chatOk, string chatError)> Connect() {
+        
+        if (api == null) {
+            api = new TwitchAPI();
+        }
+        await ReinitializeApi();
+
+        api.Settings.ClientId = settings.ClientId;
+
+        string apiToken = settings.OAuthToken;
+        if (apiToken.StartsWith("oauth:")) {
+            apiToken = apiToken.Substring(6);
+        }
+        api.Settings.AccessToken = apiToken;
+
+        // Получаем ID бота и канала
+        string authError = "";
+        try {
+            // Получаем ID бота
+            var botUsers = await api.Helix.Users.GetUsersAsync(logins: new List<string> { settings.BotUsername });
+            if (botUsers.Users.Length > 0) {
+                botId = botUsers.Users[0].Id;
+                if (settings.DebugMode) {
+                    WriteDebug($"✅ Получен botId: {botId} для бота {settings.BotUsername}\n", ConsoleColor.Green);
+                }
+            }
+
+            // Получаем ID канала
+            var channelUsers = await api.Helix.Users.GetUsersAsync(logins: new List<string> { settings.ChannelName });
+            if (channelUsers.Users.Length > 0) {
+                channelId = channelUsers.Users[0].Id;
+                if (settings.DebugMode) {
+                    WriteDebug($"✅ Получен channelId: {channelId} для канала {settings.ChannelName}\n", ConsoleColor.Green);
+                }
+            } else {
+                authError = $"Канал {settings.ChannelName} не найден";
+                return (false, authError, false, "", false, "");
+            }
+
+            // Дополнительная проверка аутентификации
+            try {
+                var validation = await api.Auth.ValidateAccessTokenAsync(api.Settings.AccessToken);
+                if (validation != null) {
+                    WriteDebug($"✅ Аутентификация подтверждена: {validation.UserId}\n", ConsoleColor.Green);
+                }
+            } catch (Exception authEx) {
+                WriteDebug($"❌ Ошибка аутентификации: {authEx.Message}\n", ConsoleColor.Red);
+            }
+
+        } catch (Exception ex) {
+            authError = $"Ошибка получения ID: {ex.Message}";
+            WriteDebug($"❌ Ошибка: {authError}\n", ConsoleColor.Red);
+            return (false, authError, false, "", false, "");
+        }
+
+        WriteDebug($"🔍 Диагностика: BotUsername='{settings.BotUsername}', ChannelName='{settings.ChannelName}'\n", ConsoleColor.Yellow);
+        WriteDebug($"🔍 Диагностика: BotId='{botId}', ChannelId='{channelId}'\n", ConsoleColor.Yellow);
+
+        bool chatOk = false;
+        bool rewardsOk = false;
+        string chatError = "";
+        string rewardsError = "";
+
+        if (settings.ChatEnabled) {
+            try {
+                var credentials = new ConnectionCredentials(settings.BotUsername, settings.OAuthToken);
+                var clientOptions = new ClientOptions {
+                    MessagesAllowedInPeriod = 750,
+                    ThrottlingPeriod = TimeSpan.FromSeconds(30)
+                };
+
+                var customClient = new WebSocketClient(clientOptions);
+                client = new TwitchClient(customClient);
+
+                client.Initialize(credentials, settings.ChannelName);
+                client.OnJoinedChannel += OnJoinedChannel;
+                client.OnMessageReceived += OnMessageReceived;
+
+                client.Connect();
+                chatOk = await WaitForChatConnection();
+                if (!chatOk) {
+                    chatError = "Таймаут подключения к чату";
+                } else {
+                    WriteDebug("✅ Чат подключен успешно\n", ConsoleColor.Green);
+                }
+            } catch (Exception ex) {
+                chatError = $"Ошибка чата: {ex.Message}";
+            }
+        }
+
+        if (settings.RewardsEnabled) {
+            // Награды будут создаваться позже через RewardManager
+            rewardsOk = true;
+        }
+
+        if (settings.RewardsEnabled && rewardsOk) {
+            try {
+                InitializePubSub();
+                WriteDebug("✅ PubSub для наград инициализирован\n", ConsoleColor.Green);
+            } catch (Exception ex) {
+                WriteDebug($"❌ Ошибка инициализации PubSub: {ex.Message}\n", ConsoleColor.Red);
+            }
+        }
+
+        return (true, "", rewardsOk, rewardsError, chatOk, chatError);
+    }
+
+    private async Task<bool> WaitForChatConnection() {
+        for (int i = 0; i < 10; i++) {
+            if (client?.IsConnected == true)
+                return true;
+            await Task.Delay(1000);
+        }
+        return client?.IsConnected == true;
+    }
+
+    private void OnJoinedChannel(object sender, OnJoinedChannelArgs e) {
+        //client.SendMessage(e.Channel, "Бот звуков подключен! Используйте !звуки для списка команд.");
+    }
+
+    private void OnMessageReceived(object sender, OnMessageReceivedArgs e) {
+        if (!settings.ChatEnabled)
+            return;
+
+        var message = e.ChatMessage.Message.ToLower();
+        var username = e.ChatMessage.Username;
+        OnChatCommand?.Invoke(this, (username, message));
+    }
+
+    private void InitializePubSub() {
+        pubSub = new TwitchPubSub();
+        pubSub.OnRewardRedeemed += OnRewardRedeemedHandler;
+        pubSub.OnPubSubServiceConnected += OnPubSubServiceConnected;
+        pubSub.OnListenResponse += OnListenResponse;
+
+        pubSub.Connect();
+
+        Task.Run(async () => {
+            await Task.Delay(2000);
+            pubSub.ListenToRewards(channelId);
+            pubSub.SendTopics(settings.OAuthToken.Replace("oauth:", ""));
+        });
+    }
+
+    private void OnRewardRedeemedHandler(object sender, TwitchLib.PubSub.Events.OnRewardRedeemedArgs e) {
+        if (!settings.RewardsEnabled)
+            return;
+
+        if (settings.DebugMode) {
+            WriteDebug($"🎁 Активирована награда: '{e.RewardTitle}' пользователем {e.DisplayName}\n", ConsoleColor.Magenta);
+        }
+
+        // Сначала проверяем маппинг по ID
+        if (rewardIdToCommandMap.TryGetValue(e.RewardId.ToString(), out string command)) {
+            OnRewardRedeemed?.Invoke(this, (command, e.DisplayName));
+        }
+        // Затем проверяем VIP награды по названию
+        else if (e.RewardTitle == "Купить VIP") {
+            OnRewardRedeemed?.Invoke(this, ("VIP_PURCHASE", e.DisplayName));
+        } else if (e.RewardTitle == "Украсть VIP") {
+            OnRewardRedeemed?.Invoke(this, ("VIP_STEAL", e.DisplayName));
+        } else {
+            // Если не нашли по ID, пробуем найти по названию для обычных команд
+            OnRewardMappingUpdated?.Invoke(this, (e.RewardId.ToString(), e.RewardTitle));
+        }
+    }
+
+    private void OnPubSubServiceConnected(object sender, EventArgs e) {
+        WriteDebug("✅ PubSub подключен\n", ConsoleColor.Green);
+    }
+
+    private void OnListenResponse(object sender, TwitchLib.PubSub.Events.OnListenResponseArgs e) {
+        if (!e.Successful) {
+            WriteDebug($"❌ Ошибка подписки на тему: {e.Topic}\n", ConsoleColor.Red);
+        } else {
+            WriteDebug($"✅ Успешная подписка на тему: {e.Topic}\n", ConsoleColor.Green);
+        }
+    }
+
+    public async Task Disconnect(bool disableRewards = true) {
+        client?.Disconnect();
+        pubSub?.Disconnect();
+        WriteDebug("Соединение закрыто\n", ConsoleColor.Yellow);
+
+        await Task.CompletedTask;
+    }
+
+    // Метод для добавления сопоставления наград
+    public void AddRewardMapping(string rewardId, string command) {
+        rewardIdToCommandMap[rewardId] = command;
+        if (settings.DebugMode) {
+            WriteDebug($"✅ Сопоставлена награда ID '{rewardId}' -> команда '{command}'\n", ConsoleColor.Green);
+        }
+    }
+
+    private void WriteDebug(string text, ConsoleColor color) {
+        if (settings.DebugMode) {
+            WriteColor(text, color);
+        }
+    }
+
+    private void WriteColor(string text, ConsoleColor color) {
+        var originalColor = Console.ForegroundColor;
+        Console.ForegroundColor = color;
+        Console.Write(text);
+        Console.ForegroundColor = originalColor;
+    }
+} 
+-------------------------------------------------------- 
+ 
