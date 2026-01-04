@@ -46,6 +46,13 @@ public class TwitchBot {
         musicKeywords = new List<string>();
         LoadMusicKeywords();
 
+        musicTracker.OnTrackUpdated += (sender, track) => {
+            // Принудительно обновляем интерфейс при изменении трека
+            if (Program.IsInterfaceActive) {
+                Program.RequestInterfaceUpdate();
+            }
+        };
+
     }
 
     private void InitializeApi() {
@@ -196,6 +203,27 @@ public class TwitchBot {
         }
     }
 
+    public async Task RemoveAllVipsFromChannel(bool confirm) {
+        if (vipManager != null) {
+            Console.Clear();
+            WriteColor("=== УДАЛЕНИЕ ВСЕХ VIP С КАНАЛА ===\n", ConsoleColor.Red);
+            WriteColor("⚠️  ВНИМАНИЕ: Это действие удалит ВСЕХ VIP с вашего Twitch канала!\n", ConsoleColor.Yellow);
+            WriteColor("⚠️  Это действие НЕОБРАТИМО!\n", ConsoleColor.Yellow);
+            WriteColor("Для подтверждения введите 'DELETE ALL': ", ConsoleColor.White);
+            var input = Console.ReadLine();
+            if (input?.ToUpper() == "DELETE ALL") {
+                await vipManager.RemoveAllVips(true);
+            } else {
+                WriteColor("❌ Отменено\n", ConsoleColor.Red);
+            }
+            WriteColor("Нажмите любую клавишу чтобы продолжить...\n", ConsoleColor.Yellow);
+            Console.ReadKey();
+        }
+    }
+    public MusicData GetCurrentTrack() {
+        return musicTracker?.GetCurrentTrack();
+    }
+
     private async void HandleChatCommand(object? sender, (string username, string message) args) {
         if (!settingsManager.Settings.ChatEnabled)
             return;
@@ -261,10 +289,16 @@ public class TwitchBot {
             return;
 
         // Обработка VIP наград по названию команды
-        if (args.command == "VIP_PURCHASE" || args.command.Contains("Купить VIP")) {
+        var normalizedCommand = args.command.ToLower().Trim();
+
+        if (normalizedCommand.Contains("vip_purchase") ||
+            normalizedCommand.Contains("купить vip") ||
+            normalizedCommand.Contains("купить_vip")) {
             HandleVipPurchase(args.username);
             return;
-        } else if (args.command == "VIP_STEAL" || args.command.Contains("Украсть VIP")) {
+        } else if (normalizedCommand.Contains("vip_steal") ||
+                   normalizedCommand.Contains("украсть vip") ||
+                   normalizedCommand.Contains("украсть_vip")) {
             HandleVipSteal(args.username);
             return;
         }
@@ -298,14 +332,12 @@ public class TwitchBot {
         if (await vipManager.PurchaseVip(username)) {
             // Записываем статистику
             statisticsDisplay.RecordVipPurchase(username);
-
             // Отправляем сообщение в чат
             connectionManager.SendMessage($"🎉 Поздравляем, {username}! Вы стали VIP на {settingsManager.Settings.VipDurationDays} дней!");
-
             // Обновляем отображение статистики
             UpdateStatisticsDisplay();
         } else {
-            connectionManager.SendMessage($"❌ {username}, невозможно выдать VIP. Возможно, нет свободных слотов или вы уже VIP.");
+            connectionManager.SendMessage($"❌ {username}, невозможно выдать VIP. Возможно, нет свободных слотов, вы уже VIP, или проблемы с правами бота.");
         }
     }
 
@@ -455,8 +487,7 @@ public class TwitchBot {
         WriteColor(settingsManager.Settings.EnableVipStealReward ? "ВКЛ" : "ВЫКЛ",
                    settingsManager.Settings.EnableVipStealReward ? ConsoleColor.Green : ConsoleColor.Red);
         Console.WriteLine();
-
-        WriteColor("5 - Удалить всех VIP (требует подтверждения)\n", ConsoleColor.Red);
+        WriteColor("5 - Удалить всех VIP\n", ConsoleColor.Red);
         Console.WriteLine();
 
         Console.Write("t - Режим отладки: ");

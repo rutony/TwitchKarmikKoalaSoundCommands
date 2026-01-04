@@ -270,6 +270,7 @@ class Program {
         // ПОДСКАЗКИ ПО КЛАВИШАМ
         Console.WriteLine();
         Console.WriteLine();
+        Console.WriteLine();
         WriteColor("s - Статистика по командам\n", ConsoleColor.DarkGray);
         WriteColor("p - Настройки\n", ConsoleColor.DarkGray);
         WriteColor("r - Перезагрузить\n", ConsoleColor.DarkGray);
@@ -919,6 +920,8 @@ public class StatisticsDisplay {
     private readonly CommandManager _commandManager;
     private readonly BotSettings _settings;
 
+    private DateTime lastVipSyncTime = DateTime.MinValue;
+
     // Статистика в реальном времени
     public int TotalSoundActivations { get; private set; }
     public int TotalPointsSpent { get; private set; }
@@ -968,15 +971,24 @@ public class StatisticsDisplay {
     }
 
     private async Task UpdateLoop(CancellationToken cancellationToken) {
+        int vipCheckCounter = 0;
+
         while (!cancellationToken.IsCancellationRequested) {
             try {
                 UpdateStatistics();
-                await Task.Delay(2000, cancellationToken); // Обновление каждые 2 секунды
+
+                // Каждые 30 секунд (15 итераций по 2 сек) проверяем статус VIP-наград
+                if (vipCheckCounter % 15 == 0 && _vipManager != null) {
+                    await _vipManager.UpdateAllVipRewardStatuses();
+                }
+
+                vipCheckCounter++;
+                await Task.Delay(2000, cancellationToken);
             } catch (TaskCanceledException) {
                 break;
             } catch (Exception ex) {
                 if (_settings.DebugMode) {
-                    WriteColor($"❌ Ошибка обновления статистики: {ex.Message}\n", ConsoleColor.Red);
+                    WriteColor($"❌ Ошибка в цикле обновления статистики: {ex.Message}\n", ConsoleColor.Red);
                 }
                 await Task.Delay(5000, cancellationToken);
             }
@@ -985,26 +997,15 @@ public class StatisticsDisplay {
 
     private async void UpdateStatistics() {
         try {
-            // Обновляем статистику VIP
-            if (_vipManager != null) {
+            // Обновляем статистику VIP только в режиме отладки или при явном запросе
+            if (_vipManager != null && (_settings.DebugMode || DateTime.Now - lastVipSyncTime > TimeSpan.FromMinutes(5))) {
                 try {
-                    // Пробуем получить количество VIP разными способами
                     VipCount = await _vipManager.GetActiveVipCountAsync();
-
-                    // Если получили 0, но должны быть VIP, используем fallback
-                    if (VipCount == 0) {
-                        var vipUsers = _vipManager.GetVipUsers();
-                        VipCount = vipUsers.Count;
-
-                        if (VipCount == 0 && _settings.DebugMode) {
-                            WriteColor($"⚠️ Не удалось получить количество VIP\n", ConsoleColor.Yellow);
-                        }
-                    }
+                    lastVipSyncTime = DateTime.Now;
                 } catch (Exception ex) {
                     if (_settings.DebugMode) {
                         WriteColor($"⚠️ Ошибка получения VIP статистики: {ex.Message}\n", ConsoleColor.Yellow);
                     }
-                    // Fallback: используем локальный подсчет
                     VipCount = _vipManager.GetActiveVipCount();
                 }
             }
@@ -1071,13 +1072,10 @@ public class StatisticsDisplay {
             // Сохраняем текущую позицию курсора
             int originalLeft = Console.CursorLeft;
             int originalTop = Console.CursorTop;
-
             // Устанавливаем позицию для вывода статистики
             Console.SetCursorPosition(left, top);
-
-            // Очищаем только область статистики (примерно 10 строк)
-            ClearArea(left, top, 80, 10);
-
+            // Очищаем только область статистики (примерно 12 строк)
+            ClearArea(left, top, 80, 12);
             // Звуковые команды
             Console.Write("🔊 Звуковые команды: ");
             WriteColor($"{TotalSoundActivations} активаций", ConsoleColor.White);
@@ -1086,22 +1084,19 @@ public class StatisticsDisplay {
             Console.WriteLine(")");
             Console.Write("   Последняя: ");
             WriteColor(LastSoundActivator, ConsoleColor.Green);
-
             // Добавляем название команды/награды
             if (LastSoundCommand != "нет") {
                 Console.Write(" (");
                 WriteColor(LastSoundCommand, ConsoleColor.Cyan);
                 Console.Write(")");
             }
-
             // Выводим время только если была активация
             if (LastSoundActivationTime > DateTime.MinValue && LastSoundActivator != "нет") {
                 Console.Write(" - ");
                 WriteColor(LastSoundActivationTime.ToString("dd.MM HH:mm"), ConsoleColor.Gray);
             }
             Console.WriteLine();
-
-            // VIP статистика - ИСПРАВЛЕНО: используем актуальное количество VIP
+            // VIP статистика
             Console.Write("⭐ VIP на канале: ");
             WriteColor($"{VipCount}/{_settings.MaxVipCount}", ConsoleColor.Magenta);
             Console.WriteLine();
@@ -1113,14 +1108,12 @@ public class StatisticsDisplay {
             Console.WriteLine();
             Console.Write("   Последняя покупка: ");
             WriteColor(LastVipPurchase, ConsoleColor.Green);
-
             // Выводим время только если была покупка
             if (LastVipPurchaseTime > DateTime.MinValue && LastVipPurchase != "нет") {
                 Console.Write(" - ");
                 WriteColor(LastVipPurchaseTime.ToString("dd.MM HH:mm"), ConsoleColor.Gray);
             }
             Console.WriteLine();
-
             // Кражи VIP
             Console.Write("🎭 Попыток кражи VIP: ");
             WriteColor($"{TotalStealAttempts}", ConsoleColor.White);
@@ -1134,20 +1127,51 @@ public class StatisticsDisplay {
                 Console.Write(" → ");
                 WriteColor(LastStealVictim, ConsoleColor.Yellow);
             }
-
             // Выводим время только если была кража
             if (LastStealTime > DateTime.MinValue && LastSuccessfulSteal != "нет") {
                 Console.Write(" - ");
                 WriteColor(LastStealTime.ToString("dd.MM HH:mm"), ConsoleColor.Gray);
             }
             Console.WriteLine();
+            // ТЕКУЩИЙ ТРЕК - ИСПРАВЛЕННЫЙ РАЗДЕЛ
+            Console.Write("🎵 Текущий трек (");
+            string statusText = _settings.MusicTrackerEnabled ? "ВКЛ" : "ВЫКЛ";
+            ConsoleColor statusColor = _settings.MusicTrackerEnabled ? ConsoleColor.Green : ConsoleColor.Gray;
+            WriteColor($"{statusText}", statusColor);
+            Console.Write("): ");
+
+            var currentTrack = _bot?.GetCurrentTrack();
+            if (_settings.MusicTrackerEnabled && currentTrack != null && !string.IsNullOrEmpty(currentTrack.Name)) {
+                // Ограничиваем длину названия трека для предотвращения наезжания
+                string trackName = currentTrack.Name;
+                if (trackName.Length > 50) {
+                    trackName = trackName.Substring(0, 47) + "...";
+                }
+                WriteColor(trackName, ConsoleColor.Cyan);
+
+                if (!string.IsNullOrEmpty(currentTrack.Link)) {
+                    // Ограничиваем длину ссылки
+                    string trackLink = currentTrack.Link;
+                    if (trackLink.Length > 50) {
+                        trackLink = trackLink.Substring(0, 47) + "...";
+                    }
+                    Console.Write(" ");
+                    WriteColor(trackLink, ConsoleColor.Blue);
+                }
+            } else {
+                WriteColor("нет", ConsoleColor.Gray);
+            }
+            Console.WriteLine();
+            Console.WriteLine();
+
+            // ДОПОЛНИТЕЛЬНЫЙ ПРОБЕЛ ДЛЯ РАЗДЕЛЕНИЯ
             Console.WriteLine();
 
             // Восстанавливаем позицию курсора
             Console.SetCursorPosition(originalLeft, originalTop);
         } catch (Exception ex) {
             if (_settings.DebugMode) {
-                WriteColor($"❌ Ошибка отображения статистики: {ex.Message}\n", ConsoleColor.Red);
+                WriteColor($"❌ Ошибка отображения статистики: {ex.Message}", ConsoleColor.Red);
             }
         }
     }
@@ -1209,14 +1233,14 @@ public class StatisticsDisplay {
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Net.Http;
+using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using TwitchLib.Api;
 using TwitchLib.Api.Helix.Models.ChannelPoints;
 using TwitchLib.Api.Helix.Models.ChannelPoints.CreateCustomReward;
 using TwitchLib.Api.Helix.Models.ChannelPoints.UpdateCustomReward;
-using System.Net.Http;
-using System.Text;
 
 public class VipManager {
     private TwitchAPI api;
@@ -1225,13 +1249,10 @@ public class VipManager {
     private string vipListFile = "config/vip_list.json";
     private List<VipItem> vipList = new List<VipItem>();
     private Random random = new Random();
-
     private List<string> successfulStealMessages = new List<string>();
     private List<string> failedStealMessages = new List<string>();
-
     private DateTime lastSyncTime = DateTime.MinValue;
-    private readonly TimeSpan syncCooldown = TimeSpan.FromMinutes(5);
-
+    private readonly TimeSpan syncCooldown = TimeSpan.FromMinutes(10);
     public string LastError { get; private set; } = "";
     private const int MAX_REWARDS = 50;
     private const int MAX_VIP_LIMIT = 100;
@@ -1240,11 +1261,9 @@ public class VipManager {
         this.api = api;
         this.channelId = channelId;
         this.settings = settings;
-
         if (!Directory.Exists("config")) {
             Directory.CreateDirectory("config");
         }
-
         LoadVipList();
         LoadStealMessages();
     }
@@ -1252,21 +1271,17 @@ public class VipManager {
     public async Task<bool> CreateVipRewards() {
         try {
             WriteDebug($"=== СОЗДАНИЕ VIP НАГРАД ===\n", ConsoleColor.Cyan);
-
             if (string.IsNullOrEmpty(channelId)) {
                 LastError = "ChannelId не доступен";
                 WriteColor($"❌ {LastError}\n", ConsoleColor.Red);
                 return false;
             }
-
             var existingRewardsResponse = await api.Helix.ChannelPoints.GetCustomRewardAsync(channelId, new List<string>(), true);
-
             if (existingRewardsResponse == null || existingRewardsResponse.Data == null) {
                 LastError = "Не удалось получить список существующих наград";
                 WriteColor($"❌ {LastError}\n", ConsoleColor.Red);
                 return false;
             }
-
             var existingRewards = existingRewardsResponse.Data;
             WriteDebug($"✅ Найдено существующих наград: {existingRewards.Length}\n", ConsoleColor.Green);
 
@@ -1274,6 +1289,7 @@ public class VipManager {
             bool vipStealCreated = false;
 
             await Task.Delay(500);
+
             if (settings.EnableVipReward) {
                 vipPurchaseCreated = await CreateOrUpdateVipReward(
                     "Купить VIP",
@@ -1285,6 +1301,7 @@ public class VipManager {
             }
 
             await Task.Delay(500);
+
             if (settings.EnableVipStealReward) {
                 vipStealCreated = await CreateOrUpdateVipReward(
                     "Украсть VIP",
@@ -1304,10 +1321,8 @@ public class VipManager {
                 WriteDebug($"Украсть VIP: {(vipStealCreated ? "✅" : "❌")}\n",
                           vipStealCreated ? ConsoleColor.Green : ConsoleColor.Red);
             }
-
             return (settings.EnableVipReward ? vipPurchaseCreated : true) &&
                    (settings.EnableVipStealReward ? vipStealCreated : true);
-
         } catch (Exception ex) {
             LastError = $"Критическая ошибка создания VIP наград: {ex.Message}";
             WriteDebug($"❌ {LastError}\n", ConsoleColor.Red);
@@ -1318,22 +1333,19 @@ public class VipManager {
     private async Task<bool> CreateOrUpdateVipReward(string rewardTitle, int cost, int cooldownSeconds = 0, string color = "", CustomReward[] existingRewards = null) {
         try {
             WriteDebug($"🔍 Обрабатываем VIP награду: '{rewardTitle}'\n", ConsoleColor.Cyan);
-
             var existingReward = existingRewards?.FirstOrDefault(r =>
                 r.Title.ToLower() == rewardTitle.ToLower());
 
             if (existingReward != null) {
                 WriteDebug($"  ✅ Награда существует, обновляю...\n", ConsoleColor.Green);
-
                 var updateRequest = new UpdateCustomRewardRequest {
                     Cost = cost,
-                    IsEnabled = true
+                    IsEnabled = true,
+                    BackgroundColor = color
                 };
-
                 try {
                     var updatedReward = await api.Helix.ChannelPoints.UpdateCustomRewardAsync(
                         channelId, existingReward.Id, updateRequest);
-
                     if (updatedReward != null) {
                         WriteColor($"  ✅ Награда '{rewardTitle}' обновлена\n", ConsoleColor.Green);
                         return true;
@@ -1345,7 +1357,6 @@ public class VipManager {
                 WriteDebug($"  ➕ Создаю новую VIP награду...\n", ConsoleColor.Yellow);
                 return await CreateNewVipReward(rewardTitle, cost, cooldownSeconds, color);
             }
-
             return false;
         } catch (Exception ex) {
             WriteColor($"  ❌ Критическая ошибка обработки награды '{rewardTitle}': {ex.Message}\n", ConsoleColor.Red);
@@ -1360,11 +1371,12 @@ public class VipManager {
                 Cost = cost,
                 IsEnabled = true,
                 BackgroundColor = color,
-                IsUserInputRequired = false
+                IsUserInputRequired = false,
+                GlobalCooldownSeconds = cooldownSeconds,
+                IsGlobalCooldownEnabled = true
             };
 
             var result = await api.Helix.ChannelPoints.CreateCustomRewardsAsync(channelId, createRequest);
-
             if (result != null && result.Data.Length > 0) {
                 WriteColor($"  ✅ Награда '{rewardTitle}' создана\n", ConsoleColor.Green);
                 return true;
@@ -1374,7 +1386,6 @@ public class VipManager {
         } catch (Exception createEx) {
             WriteColor($"  ❌ Ошибка создания награды '{rewardTitle}': {createEx.Message}\n", ConsoleColor.Red);
         }
-
         return false;
     }
 
@@ -1384,10 +1395,8 @@ public class VipManager {
                 WriteColor("❌ ChannelId не доступен для отключения VIP наград\n", ConsoleColor.Red);
                 return;
             }
-
             var rewards = await api.Helix.ChannelPoints.GetCustomRewardAsync(channelId, onlyManageableRewards: true);
             var vipRewards = rewards.Data.Where(r => r.Title == "Купить VIP" || r.Title == "Украсть VIP").ToList();
-
             foreach (var reward in vipRewards) {
                 try {
                     var updateRequest = new UpdateCustomRewardRequest { IsEnabled = false };
@@ -1403,22 +1412,30 @@ public class VipManager {
         }
     }
 
-    // ОСНОВНОЙ МЕТОД: Получение VIP через Twitch API с проверкой прав
+    public async Task UpdateAllVipRewardStatuses() {
+        try {
+            await UpdateVipPurchaseRewardAvailability();
+        } catch (Exception ex) {
+            WriteColor($"❌ Ошибка обновления статусов VIP наград: {ex.Message}\n", ConsoleColor.Red);
+        }
+    }
+
+    // ИСПРАВЛЕННЫЙ МЕТОД: Получение VIP через Twitch API с проверкой прав
     private async Task<List<string>> GetRealVipUsersFromTwitchAsync() {
         try {
             WriteDebug($"🔍 Запрос списка VIP с Twitch API...\n", ConsoleColor.Cyan);
 
             using (var httpClient = new HttpClient()) {
-                // Устанавливаем заголовки для Twitch API
-                httpClient.DefaultRequestHeaders.Add("Client-ID", api.Settings.ClientId);
+                // Правильные заголовки для Twitch API
+                httpClient.DefaultRequestHeaders.Add("Client-Id", api.Settings.ClientId);
                 httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {api.Settings.AccessToken}");
+                httpClient.DefaultRequestHeaders.Add("Accept", "application/json");
 
                 string url = $"https://api.twitch.tv/helix/channels/vips?broadcaster_id={channelId}&first=100";
                 WriteDebug($"📤 URL: {url}\n", ConsoleColor.Yellow);
 
                 var response = await httpClient.GetAsync(url);
                 var responseContent = await response.Content.ReadAsStringAsync();
-
                 WriteDebug($"📥 Статус: {response.StatusCode}\n", ConsoleColor.Yellow);
 
                 if (settings.DebugMode) {
@@ -1428,16 +1445,12 @@ public class VipManager {
                 if (response.IsSuccessStatusCode) {
                     using (JsonDocument doc = JsonDocument.Parse(responseContent)) {
                         var vips = new List<string>();
-
                         if (doc.RootElement.TryGetProperty("data", out JsonElement dataElement)) {
                             foreach (JsonElement vipElement in dataElement.EnumerateArray()) {
                                 string username = null;
-
                                 // Пробуем разные возможные поля с именем
                                 if (vipElement.TryGetProperty("user_login", out JsonElement loginElement)) {
                                     username = loginElement.GetString();
-                                } else if (vipElement.TryGetProperty("user_name", out JsonElement nameElement)) {
-                                    username = nameElement.GetString();
                                 } else if (vipElement.TryGetProperty("login", out JsonElement loginElement2)) {
                                     username = loginElement2.GetString();
                                 }
@@ -1448,13 +1461,11 @@ public class VipManager {
                                 }
                             }
                         }
-
                         WriteDebug($"✅ Получено VIP: {vips.Count}\n", ConsoleColor.Green);
                         return vips;
                     }
                 } else {
                     WriteDebug($"❌ Ошибка API: {response.StatusCode}\n", ConsoleColor.Red);
-
                     // Анализируем ошибку
                     if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized) {
                         WriteDebug($"🔐 Ошибка 401: Неверный токен\n", ConsoleColor.Red);
@@ -1470,32 +1481,38 @@ public class VipManager {
         } catch (Exception ex) {
             WriteDebug($"❌ Исключение при запросе VIP: {ex.Message}\n", ConsoleColor.Red);
         }
-
         return new List<string>();
     }
 
     // МЕТОД СИНХРОНИЗАЦИИ С ДЕТАЛЬНЫМ ЛОГИРОВАНИЕМ
-    public async Task SyncWithRealVipList() {
+    // Замените этот метод полностью
+    public async Task SyncWithRealVipList(bool force = false) {
+        // Проверяем интервал синхронизации (обычная синхронизация раз в 10 минут)
+        if (!force && DateTime.Now - lastSyncTime < TimeSpan.FromMinutes(10)) {
+            return;
+        }
+
         try {
-            // Увеличиваем интервал синхронизации до 10 минут чтобы избежать спама
-            if (DateTime.Now - lastSyncTime < TimeSpan.FromMinutes(10)) {
-                return;
+            if (force || settings.DebugMode) {
+                WriteColor($"🔄 Синхронизация VIP списка...\n", ConsoleColor.Cyan);
             }
 
-            WriteColor($"🔄 Синхронизация VIP списка...\n", ConsoleColor.Cyan);
             lastSyncTime = DateTime.Now;
 
             // Получаем реальных VIP с Twitch
             var realVips = await GetRealVipUsersFromTwitchAsync();
-
             if (!realVips.Any()) {
-                WriteColor($"⚠️ Не удалось получить VIP с Twitch или их нет\n", ConsoleColor.Yellow);
+                if (force || settings.DebugMode) {
+                    WriteColor($"⚠️ Не удалось получить VIP с Twitch или их нет\n", ConsoleColor.Yellow);
+                }
                 return;
             }
 
-            WriteDebug($"📋 Найдено VIP на канале: {realVips.Count}\n", ConsoleColor.Green);
+            if (settings.DebugMode) {
+                WriteDebug($"📋 Найдено VIP на канале: {realVips.Count}\n", ConsoleColor.Green);
+            }
 
-            // Очищаем некорректные записи (старая логика)
+            // Очищаем некорректные записи
             var invalidEntries = vipList.Where(v =>
                 v.Username.StartsWith("[{\"") ||
                 v.Username.Contains("\\u") ||
@@ -1503,59 +1520,45 @@ public class VipManager {
 
             foreach (var invalid in invalidEntries) {
                 vipList.Remove(invalid);
-                WriteDebug($"🗑️ Удалена некорректная запись: {invalid.Username}\n", ConsoleColor.Yellow);
+                if (settings.DebugMode) {
+                    WriteDebug($"🗑️ Удалена некорректная запись: {invalid.Username}\n", ConsoleColor.Yellow);
+                }
             }
 
-            // ОСНОВНОЕ ИСПРАВЛЕНИЕ: Обновляем даты для существующих VIP
-            int updatedCount = 0;
-            int addedCount = 0;
-
+            // Обновляем локальный список VIP на основе данных с канала
             foreach (var vipUsername in realVips) {
                 var normalizedUsername = vipUsername.ToLower();
                 var existingVip = vipList.FirstOrDefault(v =>
                     v.Username.Equals(normalizedUsername, StringComparison.OrdinalIgnoreCase));
 
                 if (existingVip != null) {
-                    // ОБНОВЛЯЕМ дату окончания если VIP просрочен или дата некорректная
+                    // Обновляем дату окончания если VIP просрочен или дата некорректная
                     if (existingVip.IsExpired || existingVip.ExpiryDate.Year < 2024) {
                         existingVip.GrantDate = DateTime.Now;
                         existingVip.ExpiryDate = DateTime.Now.AddDays(settings.VipDurationDays);
-                        updatedCount++;
-                        WriteDebug($"🔄 Обновлен срок VIP: {normalizedUsername}\n", ConsoleColor.Yellow);
+                        if (settings.DebugMode) {
+                            WriteDebug($"🔄 Обновлен срок VIP: {normalizedUsername}\n", ConsoleColor.Yellow);
+                        }
                     }
                 } else {
-                    // Добавляем нового VIP
+                    // Добавляем нового VIP в локальный список
                     var newVip = new VipItem(normalizedUsername, DateTime.Now, settings.VipDurationDays);
                     vipList.Add(newVip);
-                    addedCount++;
-                    WriteDebug($"➕ Добавлен VIP: {normalizedUsername}\n", ConsoleColor.Green);
+                    if (settings.DebugMode) {
+                        WriteDebug($"➕ Добавлен VIP в локальный список: {normalizedUsername}\n", ConsoleColor.Green);
+                    }
                 }
-            }
-
-            // Удаляем VIP которых нет на канале (опционально)
-            var vipUsernames = realVips.Select(v => v.ToLower()).ToList();
-            var missingVips = vipList.Where(v => !vipUsernames.Contains(v.Username.ToLower())).ToList();
-
-            foreach (var missing in missingVips) {
-                vipList.Remove(missing);
-                WriteDebug($"➖ Удален отсутствующий VIP: {missing.Username}\n", ConsoleColor.Gray);
             }
 
             // Сохраняем обновленный список
             SaveVipList();
 
             var activeVips = vipList.Count(v => !v.IsExpired);
-            WriteColor($"✅ Синхронизация завершена:\n", ConsoleColor.Green);
-            WriteColor($"   Активных VIP: {activeVips}\n", ConsoleColor.White);
-            WriteColor($"   Добавлено: {addedCount}\n", ConsoleColor.White);
-            WriteColor($"   Обновлено: {updatedCount}\n", ConsoleColor.White);
-            WriteColor($"   Удалено: {missingVips.Count}\n", ConsoleColor.White);
 
-            if (settings.DebugMode && activeVips > 0) {
-                var vipNames = vipList.Where(v => !v.IsExpired).Select(v => v.Username).ToList();
-                WriteDebug($"📋 Текущие VIP: {string.Join(", ", vipNames)}\n", ConsoleColor.Cyan);
+            if (force || settings.DebugMode) {
+                WriteColor($"✅ Синхронизация завершена:\n", ConsoleColor.Green);
+                WriteColor($"   Активных VIP: {activeVips}\n", ConsoleColor.White);
             }
-
         } catch (Exception ex) {
             WriteColor($"❌ Ошибка синхронизации: {ex.Message}\n", ConsoleColor.Red);
         }
@@ -1573,8 +1576,11 @@ public class VipManager {
             var existingRewardsResponse = await api.Helix.ChannelPoints.GetCustomRewardAsync(channelId, new List<string>(), true);
             var existingRewards = existingRewardsResponse?.Data ?? Array.Empty<CustomReward>();
 
+            // Находим награду "Купить VIP" с гибким поиском
             var vipPurchaseReward = existingRewards.FirstOrDefault(r =>
-                r.Title.ToLower() == "купить vip");
+                r.Title.ToLower().Contains("купить vip") ||
+                r.Title.ToLower().Contains("buy vip") ||
+                r.Title.ToLower().Contains("vip purchase"));
 
             if (vipPurchaseReward != null) {
                 // Обновляем доступность награды
@@ -1582,15 +1588,19 @@ public class VipManager {
                     IsEnabled = isAvailable
                 };
 
-                await api.Helix.ChannelPoints.UpdateCustomRewardAsync(channelId, vipPurchaseReward.Id, updateRequest);
+                await api.Helix.ChannelPoints.UpdateCustomRewardAsync(
+                    channelId,
+                    vipPurchaseReward.Id,
+                    updateRequest
+                );
 
                 if (settings.DebugMode) {
-                    WriteColor($"✅ Награда 'Купить VIP': {(isAvailable ? "ДОСТУПНА" : "НЕДОСТУПНА")} (VIP: {activeVipCount}/{settings.MaxVipCount})\n",
+                    WriteColor($"✅ Статус награды 'Купить VIP' обновлен: {(isAvailable ? "ДОСТУПНА" : "НЕДОСТУПНА")} (VIP: {activeVipCount}/{settings.MaxVipCount})\n",
                         isAvailable ? ConsoleColor.Green : ConsoleColor.Yellow);
                 }
             }
         } catch (Exception ex) {
-            WriteColor($"❌ Ошибка обновления награды покупки VIP: {ex.Message}\n", ConsoleColor.Red);
+            WriteColor($"❌ Ошибка обновления доступности награды покупки VIP: {ex.Message}\n", ConsoleColor.Red);
         }
     }
 
@@ -1602,22 +1612,58 @@ public class VipManager {
 
         try {
             WriteColor("🗑️  Удаление всех VIP...\n", ConsoleColor.Red);
-
             // Получаем реальных VIP с Twitch
             var realVips = await GetRealVipUsersFromTwitchAsync();
-
             if (!realVips.Any()) {
                 WriteColor("ℹ️  Нет VIP для удаления\n", ConsoleColor.Yellow);
                 return true;
+            }
+
+            WriteColor($"Удаление {realVips.Count} VIP с канала...\n", ConsoleColor.Yellow);
+
+            // Удаляем VIP с канала через API
+            int removedCount = 0;
+            foreach (var username in realVips) {
+                try {
+                    // Получаем ID пользователя
+                    var users = await api.Helix.Users.GetUsersAsync(logins: new List<string> { username });
+                    if (users?.Users == null || users.Users.Length == 0) {
+                        WriteDebug($"❌ Пользователь {username} не найден\n", ConsoleColor.Red);
+                        continue;
+                    }
+                    var userId = users.Users[0].Id;
+
+                    // Удаляем VIP через API
+                    using (var httpClient = new HttpClient()) {
+                        httpClient.DefaultRequestHeaders.Add("Client-ID", api.Settings.ClientId);
+                        httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {api.Settings.AccessToken}");
+
+                        var url = $"https://api.twitch.tv/helix/channels/vips?broadcaster_id={channelId}&user_id={userId}";
+                        var request = new HttpRequestMessage(HttpMethod.Delete, url);
+
+                        var response = await httpClient.SendAsync(request);
+                        if (response.IsSuccessStatusCode) {
+                            removedCount++;
+                            WriteDebug($"✅ Удален VIP: {username}\n", ConsoleColor.Green);
+                        } else {
+                            var errorContent = await response.Content.ReadAsStringAsync();
+                            WriteDebug($"❌ Ошибка удаления VIP {username}: {response.StatusCode} - {errorContent}\n", ConsoleColor.Red);
+                        }
+                    }
+
+                    // Пауза между запросами для предотвращения rate limit
+                    await Task.Delay(500);
+                } catch (Exception ex) {
+                    WriteColor($"❌ Ошибка удаления VIP {username}: {ex.Message}\n", ConsoleColor.Red);
+                }
             }
 
             // Очищаем локальный список
             vipList.Clear();
             SaveVipList();
 
-            WriteColor($"✅ Удалено {realVips.Count} VIP из локального списка\n", ConsoleColor.Green);
-            WriteColor("ℹ️  Для полного удаления VIP с канала используйте панель управления Twitch\n", ConsoleColor.Yellow);
-
+            WriteColor($"✅ Удалено {removedCount} из {realVips.Count} VIP с канала\n", ConsoleColor.Green);
+            WriteColor($"✅ Удалены все VIP из локального списка\n", ConsoleColor.Green);
             return true;
         } catch (Exception ex) {
             WriteColor($"❌ Ошибка удаления VIP: {ex.Message}\n", ConsoleColor.Red);
@@ -1628,7 +1674,6 @@ public class VipManager {
     public void ManuallyAddVipUsers(List<string> usernames) {
         try {
             WriteColor($"🔄 Ручное добавление VIP...\n", ConsoleColor.Cyan);
-
             foreach (var username in usernames) {
                 var normalizedUsername = username.ToLower();
                 var existingVip = vipList.FirstOrDefault(v =>
@@ -1644,7 +1689,6 @@ public class VipManager {
                     WriteColor($"✅ Обновлен VIP: {normalizedUsername}\n", ConsoleColor.Yellow);
                 }
             }
-
             SaveVipList();
             WriteColor($"✅ Ручное добавление завершено. Всего VIP: {vipList.Count(v => !v.IsExpired)}\n", ConsoleColor.Green);
         } catch (Exception ex) {
@@ -1655,7 +1699,6 @@ public class VipManager {
     public async Task<bool> PurchaseVip(string username) {
         try {
             await SyncWithRealVipList();
-
             var currentVips = await GetActiveVipCountAsync();
 
             // Проверяем лимит
@@ -1671,36 +1714,144 @@ public class VipManager {
                 return false;
             }
 
-            // Выдаем VIP
-            var existingVip = vipList.FirstOrDefault(v => v.Username.Equals(username, StringComparison.OrdinalIgnoreCase));
-            if (existingVip != null) {
-                // Продлеваем существующий VIP
-                existingVip.GrantDate = DateTime.Now;
-                existingVip.ExpiryDate = DateTime.Now.AddDays(settings.VipDurationDays);
-                WriteColor($"✅ {username} продлил VIP\n", ConsoleColor.Green);
-            } else {
-                // Создаем новый VIP
-                var vipItem = new VipItem(username, DateTime.Now, settings.VipDurationDays);
-                vipList.Add(vipItem);
-                WriteColor($"✅ {username} стал VIP\n", ConsoleColor.Green);
+            // Проверяем правильность длительности VIP
+            if (settings.VipDurationDays <= 0) {
+                settings.VipDurationDays = 30; // Устанавливаем значение по умолчанию
+                WriteColor($"⚠️ Исправлена длительность VIP: {settings.VipDurationDays} дней\n", ConsoleColor.Yellow);
             }
 
-            SaveVipList();
+            // ДОБАВЛЯЕМ ПОЛЬЗОВАТЕЛЯ В VIP НА КАНАЛЕ TITCH ПРЕЖДЕ ЧЕМ ЛОКАЛЬНО
+            if (await AddVipToChannel(username)) {
+                // Выдаем VIP
+                var existingVip = vipList.FirstOrDefault(v => v.Username.Equals(username, StringComparison.OrdinalIgnoreCase));
+                if (existingVip != null) {
+                    // Продлеваем существующий VIP
+                    existingVip.GrantDate = DateTime.Now;
+                    existingVip.ExpiryDate = DateTime.Now.AddDays(settings.VipDurationDays);
+                    WriteColor($"✅ {username} продлил VIP на {settings.VipDurationDays} дней\n", ConsoleColor.Green);
+                } else {
+                    // Создаем новый VIP
+                    var vipItem = new VipItem(username, DateTime.Now, settings.VipDurationDays);
+                    vipList.Add(vipItem);
+                    WriteColor($"✅ {username} стал VIP на {settings.VipDurationDays} дней\n", ConsoleColor.Green);
+                }
 
-            // Обновляем доступность награды
-            await UpdateVipPurchaseRewardAvailability();
-
-            return true;
-
+                SaveVipList();
+                // Обновляем доступность награды
+                await UpdateVipPurchaseRewardAvailability();
+                // Принудительная синхронизация для немедленного обновления статуса
+                await SyncWithRealVipList(true);
+                return true;
+            } else {
+                WriteColor($"❌ Не удалось добавить {username} в VIP на канале\n", ConsoleColor.Red);
+                return false;
+            }
         } catch (Exception ex) {
             WriteColor($"❌ Ошибка покупки VIP: {ex.Message}\n", ConsoleColor.Red);
             return false;
         }
     }
 
-    public async Task<int> GetActiveVipCountAsync() {
+    private async Task<bool> AddVipToChannel(string username) {
         try {
-            await SyncWithRealVipList();
+            // Получаем ID пользователя
+            var users = await api.Helix.Users.GetUsersAsync(logins: new List<string> { username });
+            if (users?.Users == null || users.Users.Length == 0) {
+                WriteColor($"❌ Пользователь {username} не найден в Twitch\n", ConsoleColor.Red);
+                return false;
+            }
+            var userId = users.Users[0].Id;
+
+            // Добавляем VIP через API (POST запрос)
+            using (var httpClient = new HttpClient()) {
+                // ПРАВИЛЬНЫЕ ЗАГОЛОВКИ - без Content-Type в DefaultRequestHeaders
+                httpClient.DefaultRequestHeaders.Add("Client-ID", api.Settings.ClientId);
+                httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {api.Settings.AccessToken}");
+
+                var requestBody = new {
+                    user_id = userId
+                };
+
+                var json = JsonSerializer.Serialize(requestBody);
+                // Content-Type устанавливается ТОЛЬКО здесь, в конструкторе StringContent
+                var content = new StringContent(json, Encoding.UTF8, "application/json");
+
+                var url = $"https://api.twitch.tv/helix/channels/vips?broadcaster_id={channelId}";
+                var response = await httpClient.PostAsync(url, content);
+
+                if (response.IsSuccessStatusCode) {
+                    WriteDebug($"✅ {username} добавлен в VIP на канале\n", ConsoleColor.Green);
+                    return true;
+                } else {
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    WriteColor($"❌ Ошибка добавления VIP: {response.StatusCode}\n", ConsoleColor.Red);
+
+                    if (response.StatusCode == System.Net.HttpStatusCode.Forbidden) {
+                        WriteColor($"🚫 Ошибка 403: Недостаточно прав. Проверьте scope: channel:manage:vips\n", ConsoleColor.Red);
+                    } else if (response.StatusCode == System.Net.HttpStatusCode.Conflict) {
+                        WriteColor($"⚠️ Пользователь {username} уже является VIP на канале\n", ConsoleColor.Yellow);
+                        return true; // Считаем операцию успешной
+                    }
+
+                    WriteDebug($"📄 Ответ ошибки: {errorContent}\n", ConsoleColor.Gray);
+                    return false;
+                }
+            }
+        } catch (Exception ex) {
+            WriteColor($"❌ Исключение при добавлении VIP: {ex.Message}\n", ConsoleColor.Red);
+            return false;
+        }
+    }
+    private async Task<bool> RemoveVipFromChannel(string username) {
+        try {
+            // Получаем ID пользователя
+            var users = await api.Helix.Users.GetUsersAsync(logins: new List<string> { username });
+            if (users?.Users == null || users.Users.Length == 0) {
+                WriteColor($"❌ Пользователь {username} не найден в Twitch\n", ConsoleColor.Red);
+                return false;
+            }
+            var userId = users.Users[0].Id;
+
+            // Удаляем VIP через API (DELETE запрос)
+            using (var httpClient = new HttpClient()) {
+                httpClient.DefaultRequestHeaders.Add("Client-ID", api.Settings.ClientId);
+                httpClient.DefaultRequestHeaders.Add("Authorization", $"Bearer {api.Settings.AccessToken}");
+
+                var url = $"https://api.twitch.tv/helix/channels/vips?broadcaster_id={channelId}&user_id={userId}";
+                var request = new HttpRequestMessage(HttpMethod.Delete, url);
+
+                var response = await httpClient.SendAsync(request);
+
+                if (response.IsSuccessStatusCode) {
+                    WriteDebug($"✅ {username} удален из VIP на канале\n", ConsoleColor.Green);
+                    return true;
+                } else {
+                    var errorContent = await response.Content.ReadAsStringAsync();
+                    WriteColor($"❌ Ошибка удаления VIP: {response.StatusCode}\n", ConsoleColor.Red);
+
+                    if (response.StatusCode == System.Net.HttpStatusCode.Forbidden) {
+                        WriteColor($"🚫 Ошибка 403: Недостаточно прав. Проверьте scope: channel:manage:vips\n", ConsoleColor.Red);
+                    } else if (response.StatusCode == System.Net.HttpStatusCode.NotFound) {
+                        WriteColor($"⚠️ Пользователь {username} не является VIP на канале\n", ConsoleColor.Yellow);
+                        return true; // Считаем операцию успешной
+                    }
+
+                    WriteDebug($"📄 Ответ ошибки: {errorContent}\n", ConsoleColor.Gray);
+                    return false;
+                }
+            }
+        } catch (Exception ex) {
+            WriteColor($"❌ Исключение при удалении VIP: {ex.Message}\n", ConsoleColor.Red);
+            return false;
+        }
+    }
+    public async Task<int> GetActiveVipCountAsync(bool forceSync = false) {
+        try {
+            // Принудительная синхронизация только если явно запрошена
+            if (forceSync) {
+                await SyncWithRealVipList(true);
+            }
+            // В обычном режиме используем кэшированные данные
             return vipList.Count(v => !v.IsExpired);
         } catch (Exception ex) {
             WriteDebug($"❌ Ошибка получения количества VIP: {ex.Message}\n", ConsoleColor.Red);
@@ -1779,30 +1930,43 @@ public class VipManager {
 
             var stolenFrom = availableVictims[random.Next(availableVictims.Count)];
 
-            var victimVip = vipList.FirstOrDefault(v => v.Username.Equals(stolenFrom, StringComparison.OrdinalIgnoreCase));
-            if (victimVip != null) {
-                victimVip.ExpiryDate = DateTime.Now.AddMinutes(-1);
+            // УДАЛЯЕМ VIP У ЖЕРТВЫ НА КАНАЛЕ
+            if (await RemoveVipFromChannel(stolenFrom)) {
+                var victimVip = vipList.FirstOrDefault(v => v.Username.Equals(stolenFrom, StringComparison.OrdinalIgnoreCase));
+                if (victimVip != null) {
+                    victimVip.ExpiryDate = DateTime.Now.AddMinutes(-1);
+                    WriteColor($"➡️ {stolenFrom} лишился VIP\n", ConsoleColor.Red);
+                }
             }
 
-            var existingThiefVip = vipList.FirstOrDefault(v => v.Username.Equals(thiefName, StringComparison.OrdinalIgnoreCase));
-            if (existingThiefVip != null) {
-                existingThiefVip.GrantDate = DateTime.Now;
-                existingThiefVip.ExpiryDate = DateTime.Now.AddDays(settings.VipDurationDays);
+            // ДОБАВЛЯЕМ VIP ВОРУ НА КАНАЛЕ
+            if (await AddVipToChannel(thiefName)) {
+                var existingThiefVip = vipList.FirstOrDefault(v => v.Username.Equals(thiefName, StringComparison.OrdinalIgnoreCase));
+                if (existingThiefVip != null) {
+                    existingThiefVip.GrantDate = DateTime.Now;
+                    existingThiefVip.ExpiryDate = DateTime.Now.AddDays(settings.VipDurationDays);
+                    WriteColor($"🔁 {thiefName} обновил свой VIP статус\n", ConsoleColor.Yellow);
+                } else {
+                    var thiefVip = new VipItem(thiefName, DateTime.Now, settings.VipDurationDays);
+                    vipList.Add(thiefVip);
+                    WriteColor($"🆕 {thiefName} получил VIP на {settings.VipDurationDays} дней\n", ConsoleColor.Green);
+                }
             } else {
-                var thiefVip = new VipItem(thiefName, DateTime.Now, settings.VipDurationDays);
-                vipList.Add(thiefVip);
+                WriteColor($"❌ Не удалось добавить {thiefName} в VIP на канале\n", ConsoleColor.Red);
+                return (false, null);
             }
 
             SaveVipList();
-
             WriteColor($"✅ {thiefName} украл VIP у {stolenFrom}\n", ConsoleColor.Green);
+            // Принудительная синхронизация для немедленного обновления статуса
+            await SyncWithRealVipList(true);
             return (true, stolenFrom);
-
         } catch (Exception ex) {
             WriteColor($"❌ Ошибка кражи VIP: {ex.Message}\n", ConsoleColor.Red);
             return (false, null);
         }
     }
+
 
     public (bool success, string stolenFrom) StealVip(string thiefName) {
         try {
@@ -2038,7 +2202,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("TwitchKarmikKoalaSoundComands")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+2c40f64f20c3093b97dcdfa9d7118329973dd6c6")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+818f984cbcfe318903d6aeea6ded41ec0314f15a")]
 [assembly: System.Reflection.AssemblyProductAttribute("TwitchKarmikKoalaSoundComands")]
 [assembly: System.Reflection.AssemblyTitleAttribute("TwitchKarmikKoalaSoundComands")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
@@ -2091,7 +2255,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("TwitchKarmikKoalaSoundComands")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Release")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+f894db10261fdb42696efa98b5e39f0c1d2afcd9")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+818f984cbcfe318903d6aeea6ded41ec0314f15a")]
 [assembly: System.Reflection.AssemblyProductAttribute("TwitchKarmikKoalaSoundComands")]
 [assembly: System.Reflection.AssemblyTitleAttribute("TwitchKarmikKoalaSoundComands")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
@@ -2168,6 +2332,9 @@ public class MusicTrackerService {
     private readonly BotSettings settings;
     private Task serverTask;
 
+    // ДОБАВЛЯЕМ СОБЫТИЕ ПРИ ОБНОВЛЕНИИ ТРЕКА
+    public event EventHandler<MusicData> OnTrackUpdated;
+
     public MusicTrackerService(BotSettings settings) {
         this.settings = settings;
     }
@@ -2175,33 +2342,29 @@ public class MusicTrackerService {
     public void Start() {
         if (isRunning)
             return;
-
         try {
             listener = new HttpListener();
             listener.Prefixes.Add($"http://localhost:{settings.MusicTrackerPort}/");
             listener.Start();
-
             isRunning = true;
             serverTask = Task.Run(StartListener);
-
-            WriteColor($"✅ Music Tracker запущен на порту {settings.MusicTrackerPort}\n", ConsoleColor.Green);
+            WriteColor($"✅ Music Tracker запущен на порту {settings.MusicTrackerPort}", ConsoleColor.Green);
         } catch (Exception ex) {
-            WriteColor($"❌ Ошибка запуска Music Tracker: {ex.Message}\n", ConsoleColor.Red);
+            WriteColor($"❌ Ошибка запуска Music Tracker: {ex.Message}", ConsoleColor.Red);
         }
     }
 
     public void Stop() {
         if (!isRunning)
             return;
-
         isRunning = false;
         try {
             listener?.Stop();
             listener?.Close();
             serverTask?.Wait(1000);
-            WriteColor("✅ Music Tracker остановлен\n", ConsoleColor.Yellow);
+            WriteColor("✅ Music Tracker остановлен", ConsoleColor.Yellow);
         } catch (Exception ex) {
-            WriteColor($"❌ Ошибка остановки Music Tracker: {ex.Message}\n", ConsoleColor.Red);
+            WriteColor($"❌ Ошибка остановки Music Tracker: {ex.Message}", ConsoleColor.Red);
         }
     }
 
@@ -2216,7 +2379,7 @@ public class MusicTrackerService {
             } catch (Exception ex) {
                 if (isRunning) // Только если мы еще не останавливаемся
                 {
-                    WriteColor($"❌ Ошибка Music Tracker: {ex.Message}\n", ConsoleColor.Red);
+                    WriteColor($"❌ Ошибка Music Tracker: {ex.Message}", ConsoleColor.Red);
                 }
                 break;
             }
@@ -2226,7 +2389,6 @@ public class MusicTrackerService {
     private async void HandleRequest(HttpListenerContext context) {
         var request = context.Request;
         var response = context.Response;
-
         try {
             // Добавляем CORS заголовки
             response.AddHeader("Access-Control-Allow-Origin", "*");
@@ -2237,41 +2399,39 @@ public class MusicTrackerService {
                 response.StatusCode = 200;
                 response.Close();
                 if (settings.DebugMode) {
-                    WriteColor("🔧 Обработан OPTIONS запрос (CORS)\n", ConsoleColor.Cyan);
+                    WriteColor("🔧 Обработан OPTIONS запрос (CORS)", ConsoleColor.Cyan);
                 }
                 return;
             }
 
             if (request.HttpMethod == "POST" && request.Url.AbsolutePath == "/") {
                 if (settings.DebugMode) {
-                    WriteColor("📨 Получен POST запрос от Tampermonkey\n", ConsoleColor.Cyan);
+                    WriteColor("📨 Получен POST запрос от Tampermonkey", ConsoleColor.Cyan);
                 }
-
                 using (var reader = new StreamReader(request.InputStream, request.ContentEncoding)) {
                     var json = await reader.ReadToEndAsync();
-
                     if (settings.DebugMode) {
-                        WriteColor($"📝 Данные: {json}\n", ConsoleColor.Gray);
+                        WriteColor($"📝 Данные: {json}", ConsoleColor.Gray);
                     }
-
                     if (!string.IsNullOrWhiteSpace(json)) {
                         try {
                             var options = new JsonSerializerOptions {
                                 PropertyNameCaseInsensitive = true
                             };
-
                             var musicData = JsonSerializer.Deserialize<MusicData>(json, options);
-
                             if (musicData != null) {
                                 currentTrack = musicData;
                                 PrintTrackInfo(musicData);
+
+                                // ВЫЗЫВАЕМ СОБЫТИЕ ПРИ ОБНОВЛЕНИИ ТРЕКА
+                                OnTrackUpdated?.Invoke(this, musicData);
 
                                 await SendResponse(response, 200, new { status = "success", message = "Track updated" });
                             } else {
                                 await SendResponse(response, 400, new { status = "error", message = "Invalid data" });
                             }
                         } catch (JsonException jsonEx) {
-                            WriteColor($"❌ Ошибка парсинга JSON: {jsonEx.Message}\n", ConsoleColor.Red);
+                            WriteColor($"❌ Ошибка парсинга JSON: {jsonEx.Message}", ConsoleColor.Red);
                             await SendResponse(response, 400, new { status = "error", message = "Invalid JSON" });
                         }
                     } else {
@@ -2280,9 +2440,8 @@ public class MusicTrackerService {
                 }
             } else if (request.HttpMethod == "GET" && request.Url.AbsolutePath == "/") {
                 if (settings.DebugMode) {
-                    WriteColor("📥 Получен GET запрос\n", ConsoleColor.Cyan);
+                    WriteColor("📥 Получен GET запрос", ConsoleColor.Cyan);
                 }
-
                 var options = new JsonSerializerOptions {
                     WriteIndented = true,
                     PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -2294,7 +2453,7 @@ public class MusicTrackerService {
                 response.Close();
             }
         } catch (Exception ex) {
-            WriteColor($"❌ Ошибка обработки запроса: {ex.Message}\n", ConsoleColor.Red);
+            WriteColor($"❌ Ошибка обработки запроса: {ex.Message}", ConsoleColor.Red);
             response.StatusCode = 500;
             response.Close();
         }
@@ -2304,14 +2463,12 @@ public class MusicTrackerService {
         try {
             response.StatusCode = statusCode;
             response.ContentType = contentType;
-
             var json = JsonSerializer.Serialize(data, new JsonSerializerOptions { WriteIndented = true });
             var buffer = Encoding.UTF8.GetBytes(json);
-
             await response.OutputStream.WriteAsync(buffer, 0, buffer.Length);
             response.Close();
         } catch (Exception ex) {
-            WriteColor($"❌ Ошибка отправки ответа: {ex.Message}\n", ConsoleColor.Red);
+            WriteColor($"❌ Ошибка отправки ответа: {ex.Message}", ConsoleColor.Red);
             response.Close();
         }
     }
@@ -2325,7 +2482,6 @@ public class MusicTrackerService {
             Console.ForegroundColor = ConsoleColor.Green;
             Console.WriteLine($"🌐 От скрипта:");
             Console.ResetColor();
-
             if (string.IsNullOrWhiteSpace(musicData.Name)) {
                 Console.ForegroundColor = ConsoleColor.Yellow;
                 Console.WriteLine("🎵 Трек: [НЕТ НАЗВАНИЯ]");
@@ -2333,7 +2489,6 @@ public class MusicTrackerService {
             } else {
                 Console.WriteLine($"🎵 Трек: {musicData.Name}");
             }
-
             if (string.IsNullOrWhiteSpace(musicData.Link)) {
                 Console.ForegroundColor = ConsoleColor.Yellow;
                 Console.WriteLine("🔗 Ссылка: [НЕТ ССЫЛКИ]");
@@ -2341,7 +2496,6 @@ public class MusicTrackerService {
             } else {
                 Console.WriteLine($"🔗 Ссылка: {musicData.Link}");
             }
-
             Console.ForegroundColor = ConsoleColor.DarkGray;
             Console.WriteLine($"⏰ Время: {DateTime.Now:HH:mm:ss}");
             Console.ResetColor();
@@ -2468,6 +2622,13 @@ public class TwitchBot {
         musicTracker = new MusicTrackerService(settingsManager.Settings);
         musicKeywords = new List<string>();
         LoadMusicKeywords();
+
+        musicTracker.OnTrackUpdated += (sender, track) => {
+            // Принудительно обновляем интерфейс при изменении трека
+            if (Program.IsInterfaceActive) {
+                Program.RequestInterfaceUpdate();
+            }
+        };
 
     }
 
@@ -2619,6 +2780,27 @@ public class TwitchBot {
         }
     }
 
+    public async Task RemoveAllVipsFromChannel(bool confirm) {
+        if (vipManager != null) {
+            Console.Clear();
+            WriteColor("=== УДАЛЕНИЕ ВСЕХ VIP С КАНАЛА ===\n", ConsoleColor.Red);
+            WriteColor("⚠️  ВНИМАНИЕ: Это действие удалит ВСЕХ VIP с вашего Twitch канала!\n", ConsoleColor.Yellow);
+            WriteColor("⚠️  Это действие НЕОБРАТИМО!\n", ConsoleColor.Yellow);
+            WriteColor("Для подтверждения введите 'DELETE ALL': ", ConsoleColor.White);
+            var input = Console.ReadLine();
+            if (input?.ToUpper() == "DELETE ALL") {
+                await vipManager.RemoveAllVips(true);
+            } else {
+                WriteColor("❌ Отменено\n", ConsoleColor.Red);
+            }
+            WriteColor("Нажмите любую клавишу чтобы продолжить...\n", ConsoleColor.Yellow);
+            Console.ReadKey();
+        }
+    }
+    public MusicData GetCurrentTrack() {
+        return musicTracker?.GetCurrentTrack();
+    }
+
     private async void HandleChatCommand(object? sender, (string username, string message) args) {
         if (!settingsManager.Settings.ChatEnabled)
             return;
@@ -2684,10 +2866,16 @@ public class TwitchBot {
             return;
 
         // Обработка VIP наград по названию команды
-        if (args.command == "VIP_PURCHASE" || args.command.Contains("Купить VIP")) {
+        var normalizedCommand = args.command.ToLower().Trim();
+
+        if (normalizedCommand.Contains("vip_purchase") ||
+            normalizedCommand.Contains("купить vip") ||
+            normalizedCommand.Contains("купить_vip")) {
             HandleVipPurchase(args.username);
             return;
-        } else if (args.command == "VIP_STEAL" || args.command.Contains("Украсть VIP")) {
+        } else if (normalizedCommand.Contains("vip_steal") ||
+                   normalizedCommand.Contains("украсть vip") ||
+                   normalizedCommand.Contains("украсть_vip")) {
             HandleVipSteal(args.username);
             return;
         }
@@ -2721,14 +2909,12 @@ public class TwitchBot {
         if (await vipManager.PurchaseVip(username)) {
             // Записываем статистику
             statisticsDisplay.RecordVipPurchase(username);
-
             // Отправляем сообщение в чат
             connectionManager.SendMessage($"🎉 Поздравляем, {username}! Вы стали VIP на {settingsManager.Settings.VipDurationDays} дней!");
-
             // Обновляем отображение статистики
             UpdateStatisticsDisplay();
         } else {
-            connectionManager.SendMessage($"❌ {username}, невозможно выдать VIP. Возможно, нет свободных слотов или вы уже VIP.");
+            connectionManager.SendMessage($"❌ {username}, невозможно выдать VIP. Возможно, нет свободных слотов, вы уже VIP, или проблемы с правами бота.");
         }
     }
 
@@ -2878,8 +3064,7 @@ public class TwitchBot {
         WriteColor(settingsManager.Settings.EnableVipStealReward ? "ВКЛ" : "ВЫКЛ",
                    settingsManager.Settings.EnableVipStealReward ? ConsoleColor.Green : ConsoleColor.Red);
         Console.WriteLine();
-
-        WriteColor("5 - Удалить всех VIP (требует подтверждения)\n", ConsoleColor.Red);
+        WriteColor("5 - Удалить всех VIP\n", ConsoleColor.Red);
         Console.WriteLine();
 
         Console.Write("t - Режим отладки: ");
@@ -3271,31 +3456,41 @@ public class TwitchConnectionManager {
         try {
             // Получаем ID пользователя
             var users = await api.Helix.Users.GetUsersAsync(logins: new List<string> { username });
-            if (users.Users.Length == 0) {
-                WriteDebug($"❌ Пользователь {username} не найден\n", ConsoleColor.Red);
+            if (users?.Users == null || users.Users.Length == 0) {
+                WriteDebug($"❌ Пользователь {username} не найден в Twitch", ConsoleColor.Red);
+                return;
+            }
+            var userId = users.Users[0].Id;
+
+            // Проверяем, что у нас есть botId
+            if (string.IsNullOrEmpty(botId)) {
+                WriteDebug($"❌ Не удалось получить ID бота для модерации. Проверьте настройки.", ConsoleColor.Red);
                 return;
             }
 
-            var userId = users.Users[0].Id;
-
-            // Используем broadcasterId как moderatorId, так как это один и тот же аккаунт
+            // Используем botId как moderatorId
             var banRequest = new TwitchLib.Api.Helix.Models.Moderation.BanUser.BanUserRequest {
                 UserId = userId,
-                Duration = durationMinutes * 60,
+                Duration = durationMinutes,
                 Reason = "Неудачная попытка кражи VIP"
             };
 
             await api.Helix.Moderation.BanUserAsync(
                 broadcasterId: channelId,
-                moderatorId: channelId, // используем channelId как moderatorId
+                moderatorId: botId, // Используем ID бота, а не channelId
                 banUserRequest: banRequest
             );
 
             if (settings.DebugMode) {
-                WriteDebug($"🔨 Пользователь {username} забанен на {durationMinutes} минут\n", ConsoleColor.Red);
+                WriteDebug($"🔨 Пользователь {username} забанен на {durationMinutes} секунд", ConsoleColor.Red);
             }
         } catch (Exception ex) {
-            WriteDebug($"❌ Ошибка бана пользователя {username}: {ex.Message}\n", ConsoleColor.Red);
+            WriteDebug($"❌ Ошибка бана пользователя {username}: {ex.Message}", ConsoleColor.Red);
+      
+        // Детальный анализ ошибки бана
+        if (ex.Message.Contains("403")) {
+                WriteDebug($"🚫 Ошибка 403: Бот не имеет прав модератора на канале. Добавьте бота в модераторы.", ConsoleColor.Red);
+        }
         }
     }
 

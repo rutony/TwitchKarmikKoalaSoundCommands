@@ -265,6 +265,7 @@ class Program {
         // ПОДСКАЗКИ ПО КЛАВИШАМ
         Console.WriteLine();
         Console.WriteLine();
+        Console.WriteLine();
         WriteColor("s - Статистика по командам\n", ConsoleColor.DarkGray);
         WriteColor("p - Настройки\n", ConsoleColor.DarkGray);
         WriteColor("r - Перезагрузить\n", ConsoleColor.DarkGray);

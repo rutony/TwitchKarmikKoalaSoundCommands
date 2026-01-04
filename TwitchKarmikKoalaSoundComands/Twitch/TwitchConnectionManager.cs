@@ -57,31 +57,41 @@ public class TwitchConnectionManager {
         try {
             // Получаем ID пользователя
             var users = await api.Helix.Users.GetUsersAsync(logins: new List<string> { username });
-            if (users.Users.Length == 0) {
-                WriteDebug($"❌ Пользователь {username} не найден\n", ConsoleColor.Red);
+            if (users?.Users == null || users.Users.Length == 0) {
+                WriteDebug($"❌ Пользователь {username} не найден в Twitch", ConsoleColor.Red);
+                return;
+            }
+            var userId = users.Users[0].Id;
+
+            // Проверяем, что у нас есть botId
+            if (string.IsNullOrEmpty(botId)) {
+                WriteDebug($"❌ Не удалось получить ID бота для модерации. Проверьте настройки.", ConsoleColor.Red);
                 return;
             }
 
-            var userId = users.Users[0].Id;
-
-            // Используем broadcasterId как moderatorId, так как это один и тот же аккаунт
+            // Используем botId как moderatorId
             var banRequest = new TwitchLib.Api.Helix.Models.Moderation.BanUser.BanUserRequest {
                 UserId = userId,
-                Duration = durationMinutes * 60,
+                Duration = durationMinutes,
                 Reason = "Неудачная попытка кражи VIP"
             };
 
             await api.Helix.Moderation.BanUserAsync(
                 broadcasterId: channelId,
-                moderatorId: channelId, // используем channelId как moderatorId
+                moderatorId: botId, // Используем ID бота, а не channelId
                 banUserRequest: banRequest
             );
 
             if (settings.DebugMode) {
-                WriteDebug($"🔨 Пользователь {username} забанен на {durationMinutes} минут\n", ConsoleColor.Red);
+                WriteDebug($"🔨 Пользователь {username} забанен на {durationMinutes} секунд", ConsoleColor.Red);
             }
         } catch (Exception ex) {
-            WriteDebug($"❌ Ошибка бана пользователя {username}: {ex.Message}\n", ConsoleColor.Red);
+            WriteDebug($"❌ Ошибка бана пользователя {username}: {ex.Message}", ConsoleColor.Red);
+      
+        // Детальный анализ ошибки бана
+        if (ex.Message.Contains("403")) {
+                WriteDebug($"🚫 Ошибка 403: Бот не имеет прав модератора на канале. Добавьте бота в модераторы.", ConsoleColor.Red);
+        }
         }
     }
 

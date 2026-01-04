@@ -10,6 +10,8 @@ public class StatisticsDisplay {
     private readonly CommandManager _commandManager;
     private readonly BotSettings _settings;
 
+    private DateTime lastVipSyncTime = DateTime.MinValue;
+
     // Статистика в реальном времени
     public int TotalSoundActivations { get; private set; }
     public int TotalPointsSpent { get; private set; }
@@ -59,15 +61,24 @@ public class StatisticsDisplay {
     }
 
     private async Task UpdateLoop(CancellationToken cancellationToken) {
+        int vipCheckCounter = 0;
+
         while (!cancellationToken.IsCancellationRequested) {
             try {
                 UpdateStatistics();
-                await Task.Delay(2000, cancellationToken); // Обновление каждые 2 секунды
+
+                // Каждые 30 секунд (15 итераций по 2 сек) проверяем статус VIP-наград
+                if (vipCheckCounter % 15 == 0 && _vipManager != null) {
+                    await _vipManager.UpdateAllVipRewardStatuses();
+                }
+
+                vipCheckCounter++;
+                await Task.Delay(2000, cancellationToken);
             } catch (TaskCanceledException) {
                 break;
             } catch (Exception ex) {
                 if (_settings.DebugMode) {
-                    WriteColor($"❌ Ошибка обновления статистики: {ex.Message}\n", ConsoleColor.Red);
+                    WriteColor($"❌ Ошибка в цикле обновления статистики: {ex.Message}\n", ConsoleColor.Red);
                 }
                 await Task.Delay(5000, cancellationToken);
             }
@@ -76,26 +87,15 @@ public class StatisticsDisplay {
 
     private async void UpdateStatistics() {
         try {
-            // Обновляем статистику VIP
-            if (_vipManager != null) {
+            // Обновляем статистику VIP только в режиме отладки или при явном запросе
+            if (_vipManager != null && (_settings.DebugMode || DateTime.Now - lastVipSyncTime > TimeSpan.FromMinutes(5))) {
                 try {
-                    // Пробуем получить количество VIP разными способами
                     VipCount = await _vipManager.GetActiveVipCountAsync();
-
-                    // Если получили 0, но должны быть VIP, используем fallback
-                    if (VipCount == 0) {
-                        var vipUsers = _vipManager.GetVipUsers();
-                        VipCount = vipUsers.Count;
-
-                        if (VipCount == 0 && _settings.DebugMode) {
-                            WriteColor($"⚠️ Не удалось получить количество VIP\n", ConsoleColor.Yellow);
-                        }
-                    }
+                    lastVipSyncTime = DateTime.Now;
                 } catch (Exception ex) {
                     if (_settings.DebugMode) {
                         WriteColor($"⚠️ Ошибка получения VIP статистики: {ex.Message}\n", ConsoleColor.Yellow);
                     }
-                    // Fallback: используем локальный подсчет
                     VipCount = _vipManager.GetActiveVipCount();
                 }
             }
@@ -162,13 +162,10 @@ public class StatisticsDisplay {
             // Сохраняем текущую позицию курсора
             int originalLeft = Console.CursorLeft;
             int originalTop = Console.CursorTop;
-
             // Устанавливаем позицию для вывода статистики
             Console.SetCursorPosition(left, top);
-
-            // Очищаем только область статистики (примерно 10 строк)
-            ClearArea(left, top, 80, 10);
-
+            // Очищаем только область статистики (примерно 12 строк)
+            ClearArea(left, top, 80, 12);
             // Звуковые команды
             Console.Write("🔊 Звуковые команды: ");
             WriteColor($"{TotalSoundActivations} активаций", ConsoleColor.White);
@@ -177,22 +174,19 @@ public class StatisticsDisplay {
             Console.WriteLine(")");
             Console.Write("   Последняя: ");
             WriteColor(LastSoundActivator, ConsoleColor.Green);
-
             // Добавляем название команды/награды
             if (LastSoundCommand != "нет") {
                 Console.Write(" (");
                 WriteColor(LastSoundCommand, ConsoleColor.Cyan);
                 Console.Write(")");
             }
-
             // Выводим время только если была активация
             if (LastSoundActivationTime > DateTime.MinValue && LastSoundActivator != "нет") {
                 Console.Write(" - ");
                 WriteColor(LastSoundActivationTime.ToString("dd.MM HH:mm"), ConsoleColor.Gray);
             }
             Console.WriteLine();
-
-            // VIP статистика - ИСПРАВЛЕНО: используем актуальное количество VIP
+            // VIP статистика
             Console.Write("⭐ VIP на канале: ");
             WriteColor($"{VipCount}/{_settings.MaxVipCount}", ConsoleColor.Magenta);
             Console.WriteLine();
@@ -204,14 +198,12 @@ public class StatisticsDisplay {
             Console.WriteLine();
             Console.Write("   Последняя покупка: ");
             WriteColor(LastVipPurchase, ConsoleColor.Green);
-
             // Выводим время только если была покупка
             if (LastVipPurchaseTime > DateTime.MinValue && LastVipPurchase != "нет") {
                 Console.Write(" - ");
                 WriteColor(LastVipPurchaseTime.ToString("dd.MM HH:mm"), ConsoleColor.Gray);
             }
             Console.WriteLine();
-
             // Кражи VIP
             Console.Write("🎭 Попыток кражи VIP: ");
             WriteColor($"{TotalStealAttempts}", ConsoleColor.White);
@@ -225,20 +217,51 @@ public class StatisticsDisplay {
                 Console.Write(" → ");
                 WriteColor(LastStealVictim, ConsoleColor.Yellow);
             }
-
             // Выводим время только если была кража
             if (LastStealTime > DateTime.MinValue && LastSuccessfulSteal != "нет") {
                 Console.Write(" - ");
                 WriteColor(LastStealTime.ToString("dd.MM HH:mm"), ConsoleColor.Gray);
             }
             Console.WriteLine();
+            // ТЕКУЩИЙ ТРЕК - ИСПРАВЛЕННЫЙ РАЗДЕЛ
+            Console.Write("🎵 Текущий трек (");
+            string statusText = _settings.MusicTrackerEnabled ? "ВКЛ" : "ВЫКЛ";
+            ConsoleColor statusColor = _settings.MusicTrackerEnabled ? ConsoleColor.Green : ConsoleColor.Gray;
+            WriteColor($"{statusText}", statusColor);
+            Console.Write("): ");
+
+            var currentTrack = _bot?.GetCurrentTrack();
+            if (_settings.MusicTrackerEnabled && currentTrack != null && !string.IsNullOrEmpty(currentTrack.Name)) {
+                // Ограничиваем длину названия трека для предотвращения наезжания
+                string trackName = currentTrack.Name;
+                if (trackName.Length > 50) {
+                    trackName = trackName.Substring(0, 47) + "...";
+                }
+                WriteColor(trackName, ConsoleColor.Cyan);
+
+                if (!string.IsNullOrEmpty(currentTrack.Link)) {
+                    // Ограничиваем длину ссылки
+                    string trackLink = currentTrack.Link;
+                    if (trackLink.Length > 50) {
+                        trackLink = trackLink.Substring(0, 47) + "...";
+                    }
+                    Console.Write(" ");
+                    WriteColor(trackLink, ConsoleColor.Blue);
+                }
+            } else {
+                WriteColor("нет", ConsoleColor.Gray);
+            }
+            Console.WriteLine();
+            Console.WriteLine();
+
+            // ДОПОЛНИТЕЛЬНЫЙ ПРОБЕЛ ДЛЯ РАЗДЕЛЕНИЯ
             Console.WriteLine();
 
             // Восстанавливаем позицию курсора
             Console.SetCursorPosition(originalLeft, originalTop);
         } catch (Exception ex) {
             if (_settings.DebugMode) {
-                WriteColor($"❌ Ошибка отображения статистики: {ex.Message}\n", ConsoleColor.Red);
+                WriteColor($"❌ Ошибка отображения статистики: {ex.Message}", ConsoleColor.Red);
             }
         }
     }
